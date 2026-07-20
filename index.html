@@ -138,22 +138,40 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 <!-- TOP -->
 <div id="s-top" class="screen active">
   <div class="nav">
-    <div><div class="nav-title" id="top-clinic-name">藤原整形外科リハビリ予約</div><div class="nav-sub">外来運動器リハビリテーション</div></div>
-  </div>
-  <div class="pad" style="display:flex;flex-direction:column;gap:12px;padding-top:28px">
-    <div style="text-align:center;padding:8px 0 20px">
-      <div style="font-size:44px;margin-bottom:8px">🏥</div>
-      <p style="font-size:20px;font-weight:700">リハビリ予約</p>
-      <p style="font-size:13px;color:#8E8E93;margin-top:4px">空き確認・予約・キャンセル</p>
+    <div>
+      <div class="nav-title" id="top-clinic-name">藤原整形外科リハビリ予約</div>
+      <div class="nav-sub">
+        ⚠️ 当日キャンセルは <strong>電話</strong> をお願いします。
+        <a href="tel:055-254-0511" style="color:#007AFF;text-decoration:none;font-weight:600">TEL.055-254-0511</a>
+      </div>
     </div>
-    <div id="remind-area"></div>
-    <button class="btn btn-primary btn-block" onclick="showScreen('s-public')" style="font-size:16px;padding:16px;flex-direction:column;gap:2px;height:auto">
-      <span>空き状況の確認</span>
-      <span style="font-size:12px;opacity:.85;font-weight:400">予約の追加はこちら</span>
+  </div>
+  <div class="pad" style="display:flex;flex-direction:column;gap:12px;padding-top:20px">
+    <div style="text-align:center;padding:8px 0 8px">
+      <div style="font-size:40px;margin-bottom:6px">🏥</div>
+      <p style="font-size:20px;font-weight:700">リハビリ予約</p>
+    </div>
+
+    <!-- 患者ID説明カード -->
+    <div style="background:#E8F4FF;border:1px solid #B3D4FF;border-radius:12px;padding:14px 16px">
+      <p style="font-size:13px;font-weight:700;color:#004494;margin-bottom:8px">🪪 患者IDについて</p>
+      <p style="font-size:13px;color:#1C1C1E;line-height:1.7">
+        患者IDは <strong>名前のイニシャル＋患者番号</strong> です
+      </p>
+      <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-top:8px;font-size:13px;line-height:1.8">
+        <span style="color:#8E8E93">例）名前：</span>藤原 太郎<br>
+        <span style="color:#8E8E93">　　患者番号：</span>900001<br>
+        <span style="color:#8E8E93">　　→ 患者ID：</span><strong style="font-size:16px;color:#007AFF;letter-spacing:1px">ft900001</strong>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" onclick="showScreen('s-patient-login')" style="font-size:16px;padding:16px;flex-direction:column;gap:2px;height:auto">
+      <span>予約の確認・変更・キャンセルはこちら</span>
+      <span style="font-size:12px;opacity:.85;font-weight:400">患者IDでログイン</span>
     </button>
-    <button class="btn btn-block" onclick="showScreen('s-patient-login')" style="font-size:16px;padding:16px;flex-direction:column;gap:2px;height:auto">
-      <span>予約の変更・キャンセルはこちら</span>
-      <span style="font-size:12px;color:#8E8E93;font-weight:400">患者IDでログイン</span>
+    <button class="btn btn-block" onclick="showScreen('s-public')" style="font-size:16px;padding:14px;flex-direction:column;gap:2px;height:auto">
+      <span>空き状況の確認・予約の追加はこちら</span>
+      <span style="font-size:12px;color:#8E8E93;font-weight:400">担当を選んで空き枠を確認</span>
     </button>
     <button class="btn btn-block" onclick="showScreen('s-admin-login')" style="font-size:15px;padding:14px;color:#8E8E93">
       🔒 管理者ログイン
@@ -226,16 +244,16 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div><div class="nav-title" id="p-welcome">患者さん</div><div class="nav-sub" id="p-id-sub"></div></div>
     <button class="btn btn-sm" onclick="showScreen('s-top')">戻る</button>
   </div>
-  <div id="p-remind" style="padding:12px 16px 0"></div>
   <div id="p-banner" style="padding:8px 16px 0"></div>
   <div class="tab-bar" id="p-tabs">
-    <div class="tab active" onclick="switchTab('p','upcoming',this)">今後の予定</div>
-    <div class="tab" onclick="switchTab('p','reserve',this)">予約する</div>
+    <div class="tab active" onclick="switchTab('p','mybook',this)">現在の予約確認</div>
+    <div class="tab" onclick="switchTab('p','reserve',this)">追加したい場合はこちら</div>
     <div class="tab" onclick="switchTab('p','history',this)">受診履歴</div>
   </div>
-  <div class="pad pt-12" id="ptab-upcoming"></div>
+  <div class="pad pt-12" id="ptab-mybook"></div>
   <div id="ptab-reserve" style="display:none"></div>
   <div class="pad pt-12" id="ptab-history" style="display:none"></div>
+
 </div>
 
 <!-- ADMIN LOGIN -->
@@ -276,6 +294,17 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 
   <!-- お知らせ -->
   <div class="pad pt-12" id="atab-notify">
+    <!-- 本日の予定 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">📋 本日の予定</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="th-btn active-t" id="today-btn-t" onclick="selectTodayTherapist('tanaka')">PT 田中</button>
+        <button class="th-btn" id="today-btn-f" onclick="selectTodayTherapist('fukasawa')">PT 深澤</button>
+      </div>
+      <div id="today-schedule"></div>
+    </div>
+    <hr style="border:none;border-top:1px solid #E5E5EA;margin-bottom:16px">
+    <!-- 通知 -->
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
       <span style="font-size:15px;font-weight:600">直近の予約変更</span>
       <span class="badge badge-danger" id="notif-cnt" style="display:none"></span>
@@ -687,20 +716,64 @@ function showScreen(id){
   window.scrollTo(0,0);
 }
 function switchTab(prefix,name,el){
-  const all=prefix==='p'?['upcoming','reserve','history']:
+  const all=prefix==='p'?['mybook','reserve','history']:
     ['notify','calendar','schedule','status','patients','booking','slots','holidays','logs','deadline','settings'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
   el.closest('.tab-bar').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
+  if(name==='mybook')renderMyBookings();
+  if(name==='reserve')renderReserve();
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
   if(name==='patients')renderPatientList();
+  if(name==='notify'){renderTodaySchedule('tanaka');renderNotifications();}
   if(name==='booking')renderBooking();
   if(name==='slots')renderSlotDefs();
   if(name==='holidays')renderHolidays();
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
+}
+
+let todayTherapist='tanaka';
+function selectTodayTherapist(t){
+  todayTherapist=t;
+  document.getElementById('today-btn-t').className='th-btn'+(t==='tanaka'?' active-t':'');
+  document.getElementById('today-btn-f').className='th-btn'+(t==='fukasawa'?' active-f':'');
+  renderTodaySchedule(t);
+}
+function renderTodaySchedule(th){
+  const el=document.getElementById('today-schedule');
+  if(!el)return;
+  todayTherapist=th;
+  const ds=dateStr(TODAY);
+  const dow=TODAY.getDay();
+  if(isHoliday(ds)||dow===0){
+    el.innerHTML='<div class="card" style="text-align:center;color:#B00020;font-size:13px">🔴 本日は休診日です</div>';
+    return;
+  }
+  ensureBookingShape(ds);
+  const times=slotDefsForDay(dow,th).sort((a,b)=>{
+    const [ah,am]=a.split(':').map(Number);
+    const [bh,bm]=b.split(':').map(Number);
+    return (ah*60+am)-(bh*60+bm);
+  });
+  if(!times.length){el.innerHTML='<div style="font-size:13px;color:#8E8E93;padding:8px 0">本日の予約枠はありません</div>';return;}
+  let html='<div class="card" style="padding:10px 14px">';
+  let hasPatient=false;
+  times.forEach(t=>{
+    const pid=bookings[ds]?.[th]?.[t];
+    const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
+    const empty=!pid;
+    if(!empty)hasPatient=true;
+    html+=`<div class="sched-row">
+      <span class="sched-time" style="font-weight:600">${t}</span>
+      <span class="sched-name" style="${empty?'color:#C7C7CC':'font-weight:500'}">${empty?'空き':(patients[pid]?.name||'不明')}</span>
+      ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px">空き</span>'}
+    </div>`;
+  });
+  html+='</div>';
+  el.innerHTML=html;
 }
 function openModal(html){document.getElementById('modal-box').innerHTML=html;document.getElementById('modal-overlay').classList.add('open');}
 function closeModal(){document.getElementById('modal-overlay').classList.remove('open');}
@@ -719,11 +792,9 @@ function renderReminder(){
       });
     });
   });
-  // トップのリマインドエリア（患者未ログイン状態）
+  // トップページのリマインドエリアは個人情報を出さない
   const remEl=document.getElementById('remind-area');
-  if(remEl&&msgs.length){
-    remEl.innerHTML=`<div class="remind-banner">🔔 <strong>本日・明日の予約</strong><br>${msgs.slice(0,3).map(m=>`<span style="font-size:12px;opacity:.9">${m}</span>`).join('<br>')}</div>`;
-  }
+  if(remEl)remEl.innerHTML='';
 }
 
 function renderPatientReminder(pid){
@@ -835,11 +906,55 @@ function patientLogin(){
     currentPid=id;err.style.display='none';
     document.getElementById('p-welcome').textContent=patients[id].name+' さん';
     document.getElementById('p-id-sub').textContent=id;
-    renderPatientReminder(id);renderBanner();renderUpcoming();renderReserve();renderHistory();
+    renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
     showScreen('s-patient');
     document.getElementById('p-tabs').querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===0));
-    ['upcoming','reserve','history'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
+    ['mybook','reserve','history'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
   } else {err.style.display='block';}
+}
+
+function renderMyBook(){
+  const upcoming=getPatientUpcoming(currentPid);
+  const el=document.getElementById('ptab-mybook');
+  if(!el)return;
+  let html='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
+  if(!upcoming.length){
+    html+=`<div class="empty">📅 現在、予約はありません</div>
+    <div style="margin-top:16px">
+      <button class="btn btn-primary btn-block" onclick="switchTabByName('reserve')">空き枠を確認して予約する</button>
+    </div>`;
+  } else {
+    upcoming.forEach(u=>{
+      const d=new Date(u.date);
+      const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+      const isToday=dateStr(d)===dateStr(TODAY);
+      const isTomorrow=dateStr(d)===dateStr(TOMORROW);
+      const label=isToday?'<span class="badge badge-danger" style="margin-left:6px">本日</span>':
+                  isTomorrow?'<span class="badge badge-warn" style="margin-left:6px">明日</span>':'';
+      html+=`<div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div>
+            <span style="font-weight:700;font-size:16px">${m}月${day}日（${wd}）</span>${label}
+            <div style="font-size:14px;color:#007AFF;font-weight:600;margin-top:2px">${u.time}</div>
+            <div style="font-size:12px;color:#8E8E93;margin-top:2px">${u.therapist==='tanaka'?'PT 田中':'PT 深澤'} ／ 40分 ／ 2単位</div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="showCancelModal('${u.date}','${u.time}','${u.therapist}')">キャンセル</button>
+        </div>
+      </div>`;
+    });
+    html+=`<div style="margin-top:8px">
+      <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
+    </div>`;
+  }
+  el.innerHTML=html;
+}
+
+function switchTabByName(name){
+  const tabBar=document.getElementById('p-tabs');
+  const tabs=tabBar.querySelectorAll('.tab');
+  const nameMap={'mybook':0,'reserve':1,'history':2};
+  const idx=nameMap[name];
+  if(idx!==undefined) tabs[idx].click();
 }
 
 function renderBanner(){
@@ -1015,6 +1130,7 @@ function adminLogin(){
     const now=new Date();
     document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
     renderNotifications();renderDeadline();renderSettingsDisplay();
+    renderTodaySchedule('tanaka');
     document.getElementById('cn-name').value=clinicName;
     document.getElementById('s-start').value=settings.start;
     document.getElementById('s-end').value=settings.end;
@@ -1201,7 +1317,11 @@ function renderSlotDefs(){
   let html='';
   Object.entries(groups).forEach(([day,slots])=>{
     html+=`<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px">${day}</div>`;
-    slots.sort((a,b)=>a.time_slot.localeCompare(b.time_slot)).forEach(s=>{
+    slots.sort((a,b)=>{
+      const [ah,am]=a.time_slot.split(':').map(Number);
+      const [bh,bm]=b.time_slot.split(':').map(Number);
+      return (ah*60+am)-(bh*60+bm);
+    }).forEach(s=>{
       html+=`<div class="sched-row">
         <span class="sched-time">${s.time_slot}</span>
         <span class="chip ${s.therapist==='tanaka'?'chip-tanaka':'chip-fukasawa'}">${s.therapist==='tanaka'?'PT田中':'PT深澤'}</span>
@@ -1241,7 +1361,7 @@ function renderHolidays(){
   const el=document.getElementById('holiday-list');
   if(!holidays.size){el.innerHTML='<div class="empty">休診日の登録はありません</div>';return;}
   let html='';
-  [...holidays].sort().forEach(ds=>{
+  [...holidays].sort((a,b)=>new Date(a)-new Date(b)).forEach(ds=>{
     const d=new Date(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1"><span style="font-size:14px;font-weight:500">${m}月${day}日（${wd}）</span></div>
