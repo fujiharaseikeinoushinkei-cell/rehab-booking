@@ -492,7 +492,17 @@ const SUPABASE_KEY="sb_publishable_CzaEUqN069mXRaTWb4pnlg_xAhKGESA";
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 const DAY_NAMES=['日','月','火','水','木','金','土'];
-const TODAY=new Date(); TODAY.setHours(0,0,0,0);
+
+// ---- タイムゾーン修正：日本時間(JST)で今日の日付を正しく取得 ----
+function getJSTToday(){
+  const now=new Date();
+  // UTCオフセットをJST(+9時間)に合わせて補正
+  const jst=new Date(now.getTime()+9*60*60*1000);
+  jst.setUTCHours(0,0,0,0);
+  // ローカルのDateオブジェクトとして返す
+  return new Date(jst.getUTCFullYear(),jst.getUTCMonth(),jst.getUTCDate());
+}
+const TODAY=getJSTToday();
 const TOMORROW=new Date(TODAY); TOMORROW.setDate(TOMORROW.getDate()+1);
 
 let ADMIN_PW="rehab2025";
@@ -511,7 +521,13 @@ let adminBookSelected=null,bkWeekOffset=0,pubWeekOffset=0;
 let pubTherapist=null;
 
 // ---- HELPERS ----
-function dateStr(d){return d.toISOString().split('T')[0];}
+// dateStr: JSTローカル日付を YYYY-MM-DD 形式で返す（toISOStringはUTC基準なので使わない）
+function dateStr(d){
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
@@ -854,14 +870,16 @@ function renderPublicSlots(){
       continue;
     }
     ensureBookingShape(ds);
-    const openTimes=times.filter(t=>!bookings[ds][pubTherapist][t]);
+    const openTimes=times
+      .filter(t=>!bookings[ds][pubTherapist][t])
+      .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
     html+=`<div class="card" style="padding:12px;margin-bottom:8px">
       <div style="font-size:14px;font-weight:600;margin-bottom:8px">${DAY_NAMES[dow]}曜日 <span style="font-size:12px;color:#8E8E93;font-weight:400">${d.getMonth()+1}/${d.getDate()}</span></div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px">`;
+      <div style="display:flex;flex-direction:column;gap:6px">`;
     openTimes.forEach(t=>{
-      html+=`<div class="slot open" onclick="pubBookModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${t}','${ds}')">${t}</div>`;
+      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="pubBookModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${t}','${ds}')"><span style="font-size:15px;font-weight:600">${t}</span><span style="font-size:12px;color:#1A7F47">空き ○ タップで予約</span></div>`;
     });
     html+='</div></div>';
   }
@@ -1038,14 +1056,16 @@ function renderResSlots(){
     if(!times.length)continue;
     if(isHoliday(ds)||dow===0){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
     ensureBookingShape(ds);
-    const openTimes=times.filter(t=>!bookings[ds][resTherapist][t]);
+    const openTimes=times
+      .filter(t=>!bookings[ds][resTherapist][t])
+      .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
     html+=`<div style="margin-bottom:12px">
       <p style="font-size:13px;font-weight:600;margin-bottom:6px;color:#8E8E93">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px">`;
+      <div style="display:flex;flex-direction:column;gap:6px">`;
     openTimes.forEach(time=>{
-      html+=`<div class="slot open" onclick="showReserveModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${time}','${ds}','${resTherapist}')">${time}</div>`;
+      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="showReserveModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${time}','${ds}','${resTherapist}')"><span style="font-size:15px;font-weight:600">${time}</span><span style="font-size:12px;color:#1A7F47">タップで予約</span></div>`;
     });
     html+='</div></div>';
   }
