@@ -266,7 +266,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div style="display:flex;flex-direction:column;align-items:center;padding:48px 32px;gap:16px">
     <div style="font-size:44px">🔒</div>
     <p style="font-size:14px;color:#8E8E93">管理者パスワードを入力</p>
-    <input type="password" id="admin-pw" placeholder="パスワード" style="font-size:18px;text-align:center;max-width:280px">
+    <!-- ブラウザのオートフィル防止用ダミーフィールド -->
+    <input type="text" style="display:none" aria-hidden="true">
+    <input type="password" style="display:none" aria-hidden="true">
+    <input type="password" id="admin-pw" placeholder="パスワード" style="font-size:18px;text-align:center;max-width:280px" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
     <button class="btn btn-primary btn-block" onclick="adminLogin()" style="max-width:280px;font-size:17px;padding:14px">ログイン</button>
     <p id="admin-err" style="font-size:13px;color:#FF3B30;display:none">パスワードが違います</p>
   </div>
@@ -280,6 +283,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   </div>
   <div class="tab-bar">
     <div class="tab active" onclick="switchTab('a','notify',this)">お知らせ</div>
+    <div class="tab" onclick="switchTab('a','weektable',this)">週間表</div>
     <div class="tab" onclick="switchTab('a','calendar',this)">カレンダー</div>
     <div class="tab" onclick="switchTab('a','schedule',this)">スケジュール</div>
     <div class="tab" onclick="switchTab('a','status',this)">ステータス</div>
@@ -287,6 +291,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div class="tab" onclick="switchTab('a','booking',this)">代理予約</div>
     <div class="tab" onclick="switchTab('a','slots',this)">枠設定</div>
     <div class="tab" onclick="switchTab('a','holidays',this)">休診日</div>
+    <div class="tab" onclick="switchTab('a','leaves',this)">PT休暇</div>
     <div class="tab" onclick="switchTab('a','logs',this)">操作ログ</div>
     <div class="tab" onclick="switchTab('a','deadline',this)">期限</div>
     <div class="tab" onclick="switchTab('a','settings',this)">設定</div>
@@ -311,6 +316,22 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
     <div id="notif-list"></div>
     <div id="notif-empty" class="empty" style="display:none">✅ 未確認のお知らせはありません</div>
+  </div>
+
+  <!-- 週間スケジュール表 -->
+  <div id="atab-weektable" style="display:none">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:#fff;border-bottom:1px solid #E5E5EA">
+      <button class="btn btn-sm" onclick="weekTableNav(-1)">‹ 前週</button>
+      <span id="weektable-label" style="flex:1;text-align:center;font-size:14px;font-weight:600"></span>
+      <button class="btn btn-sm" onclick="weekTableNav(1)">次週 ›</button>
+    </div>
+    <div style="padding:10px 8px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <div id="weektable-body"></div>
+    </div>
+    <div style="padding:4px 12px 12px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#8E8E93">
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#DBEAFE;border-radius:2px;display:inline-block"></span>空き枠（クリックで予約）</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#E5E7EB;border-radius:2px;display:inline-block"></span>休診・休暇</span>
+    </div>
   </div>
 
   <!-- カレンダー -->
@@ -434,6 +455,27 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="holiday-list"></div>
   </div>
 
+  <!-- PT個別休暇 -->
+  <div class="pad pt-12" id="atab-leaves" style="display:none">
+    <div class="card">
+      <div style="font-size:13px;font-weight:600;color:#8E8E93;margin-bottom:10px">PT休暇を追加</div>
+      <div class="input-group"><label>担当PT</label>
+        <select id="lv-th"><option value="tanaka">PT 田中</option><option value="fukasawa">PT 深澤</option></select>
+      </div>
+      <div class="input-group"><label>日付</label><input type="date" id="lv-date"></div>
+      <div class="input-group"><label>種別</label>
+        <select id="lv-label"><option>年休</option><option>半休（午前）</option><option>半休（午後）</option><option>研修</option><option>その他</option></select>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="addLeave()">追加する</button>
+    </div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:10px;margin-top:4px">PT休暇一覧</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="th-btn active-t" id="lv-btn-t" onclick="selectLeaveFilter('tanaka')">PT 田中</button>
+      <button class="th-btn" id="lv-btn-f" onclick="selectLeaveFilter('fukasawa')">PT 深澤</button>
+    </div>
+    <div id="leave-list"></div>
+  </div>
+
   <!-- 操作ログ -->
   <div class="pad pt-12" id="atab-logs" style="display:none">
     <div style="font-size:14px;font-weight:600;margin-bottom:12px">操作履歴（直近50件）</div>
@@ -463,9 +505,9 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
     <div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:14px">パスワード変更</div>
-      <div class="input-group"><label>現在のパスワード</label><input type="password" id="pw-old"></div>
-      <div class="input-group"><label>新しいパスワード</label><input type="password" id="pw-new"></div>
-      <div class="input-group"><label>新しいパスワード（確認）</label><input type="password" id="pw-new2"></div>
+      <div class="input-group"><label>現在のパスワード</label><input type="password" id="pw-old" autocomplete="new-password" autocorrect="off" spellcheck="false"></div>
+      <div class="input-group"><label>新しいパスワード</label><input type="password" id="pw-new" autocomplete="new-password" autocorrect="off" spellcheck="false"></div>
+      <div class="input-group"><label>新しいパスワード（確認）</label><input type="password" id="pw-new2" autocomplete="new-password" autocorrect="off" spellcheck="false"></div>
       <button class="btn btn-primary btn-block" onclick="changePassword()">変更する</button>
       <p id="pw-msg" style="font-size:13px;margin-top:8px;display:none;text-align:center"></p>
     </div>
@@ -514,6 +556,10 @@ let notifications=[];
 let settings={start:"",end:"",tstart:"09:00",tend:"12:00"};
 let slotDefs=[];       // [{id,day_of_week,time_slot,therapist,is_active}]
 let holidays=new Set();// Set of "YYYY-MM-DD"
+let leaves={tanaka:new Set(),fukasawa:new Set()}; // PT別休暇日
+let leaveData=[];      // 全休暇レコード
+let weekTableOffset=0; // 週間表のオフセット
+let leaveFilter='tanaka';
 let currentPid=null;
 let schedTherapist="tanaka",schedView="day",schedOffset=0;
 let calYear=TODAY.getFullYear(),calMonth=TODAY.getMonth(),calSelected=null;
@@ -531,7 +577,9 @@ function dateStr(d){
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
-function isSunday(ds){return new Date(ds).getDay()===0;}
+function isLeave(ds,th){return leaves[th]&&leaves[th].has(ds);}
+function isDayOff(ds){return isHoliday(ds)||new Date(ds).getDay()===0;}
+function isTherapistOff(ds,th){return isDayOff(ds)||isLeave(ds,th);}
 
 function slotDefsForDay(dow,therapist){
   return slotDefs.filter(s=>s.day_of_week===dow&&s.therapist===therapist&&s.is_active)
@@ -593,6 +641,15 @@ async function loadAllData(){
   // holidays
   const {data:hd}=await sb.from('holidays').select('holiday_date');
   holidays=new Set((hd||[]).map(h=>h.holiday_date));
+
+  // therapist leaves: {therapist: Set of date strings}
+  const {data:ld}=await sb.from('therapist_leaves').select('*');
+  leaves={tanaka:new Set(),fukasawa:new Set()};
+  leaveData=[];
+  (ld||[]).forEach(l=>{
+    if(leaves[l.therapist])leaves[l.therapist].add(l.leave_date);
+    leaveData.push(l);
+  });
 
   // patients
   const {data:pd}=await sb.from('patients').select('*');
@@ -730,23 +787,34 @@ function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
+  // 画面遷移時にパスワード欄を必ずクリア
+  const pw=document.getElementById('admin-pw');
+  if(pw)pw.value='';
+  const pwOld=document.getElementById('pw-old');
+  const pwNew=document.getElementById('pw-new');
+  const pwNew2=document.getElementById('pw-new2');
+  if(pwOld)pwOld.value='';
+  if(pwNew)pwNew.value='';
+  if(pwNew2)pwNew2.value='';
 }
 function switchTab(prefix,name,el){
   const all=prefix==='p'?['mybook','reserve','history']:
-    ['notify','calendar','schedule','status','patients','booking','slots','holidays','logs','deadline','settings'];
+    ['notify','weektable','calendar','schedule','status','patients','booking','slots','holidays','leaves','logs','deadline','settings'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
   el.closest('.tab-bar').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  if(name==='mybook')renderMyBookings();
+  if(name==='mybook')renderMyBook();
   if(name==='reserve')renderReserve();
+  if(name==='notify'){renderTodaySchedule('tanaka');renderNotifications();}
+  if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
   if(name==='patients')renderPatientList();
-  if(name==='notify'){renderTodaySchedule('tanaka');renderNotifications();}
   if(name==='booking')renderBooking();
   if(name==='slots')renderSlotDefs();
   if(name==='holidays')renderHolidays();
+  if(name==='leaves'){leaveFilter='tanaka';renderLeaves('tanaka');}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
 }
@@ -828,6 +896,230 @@ function renderPatientReminder(pid){
     const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     rEl.innerHTML=`<div class="remind-banner">${label}<br><span style="font-size:14px;font-weight:700">${m}月${day}日（${wd}） ${n.time}</span></div>`;
   } else {rEl.innerHTML='';}
+}
+
+// ---- WEEK TABLE ----
+function weekTableNav(d){weekTableOffset+=d;renderWeekTable();}
+
+function renderWeekTable(){
+  const el=document.getElementById('weektable-body');
+  if(!el)return;
+  const ws=monday(addDays(TODAY,weekTableOffset*7));
+  const days=[];
+  for(let i=0;i<6;i++){const d=addDays(ws,i);days.push(d);}// 月〜土
+
+  // 週ラベル
+  const we=days[days.length-1];
+  document.getElementById('weektable-label').textContent=
+    `${ws.getMonth()+1}月${ws.getDate()}日（月）〜${we.getMonth()+1}月${we.getDate()}日（土）`;
+
+  // 全スロット時間を収集（全曜日・両PT）
+  const allTimes=new Set();
+  days.forEach(d=>{
+    const dow=d.getDay();
+    ['tanaka','fukasawa'].forEach(th=>{
+      slotDefsForDay(dow,th).forEach(t=>allTimes.add(t));
+    });
+  });
+  const sortedTimes=[...allTimes].sort((a,b)=>{
+    const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
+    return(ah*60+am)-(bh*60+bm);
+  });
+
+  if(!sortedTimes.length){
+    el.innerHTML='<div class="empty">予約枠が設定されていません</div>';
+    return;
+  }
+
+  // テーブル構築
+  const CELL_W='64px';
+  const THERAPISTS=['tanaka','fukasawa'];
+  const TH_NAMES=['田中','深澤'];
+
+  let html=`<table style="border-collapse:collapse;font-size:11px;min-width:500px;width:100%">`;
+
+  // ヘッダー行1: 曜日
+  html+=`<thead><tr>
+    <th style="border:1px solid #D1D1D6;padding:4px 6px;background:#F9FAFB;min-width:64px;position:sticky;left:0;z-index:2"></th>`;
+  days.forEach(d=>{
+    const ds=dateStr(d);
+    const dow=d.getDay();
+    const off=isDayOff(ds);
+    const bg=off?'#F3F4F6':'#EFF6FF';
+    const dayLabel=['日','月','火','水','木','金','土'][dow];
+    html+=`<th colspan="2" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W}">
+      <div style="font-weight:600">${dayLabel}</div>
+      <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
+      ${off?'<div style="font-size:9px;color:#B00020">休診</div>':''}
+    </th>`;
+  });
+  html+=`</tr>`;
+
+  // ヘッダー行2: 担当PT
+  html+=`<tr><th style="border:1px solid #D1D1D6;background:#F9FAFB;position:sticky;left:0;z-index:2"></th>`;
+  days.forEach(d=>{
+    const ds=dateStr(d);
+    const off=isDayOff(ds);
+    THERAPISTS.forEach((th,ti)=>{
+      const lv=isLeave(ds,th);
+      const bg=off?'#F3F4F6':lv?'#FEF3C7':'#F0F9FF';
+      const name=TH_NAMES[ti];
+      html+=`<th style="border:1px solid #D1D1D6;padding:3px 2px;background:${bg};text-align:center;font-weight:500;font-size:10px;min-width:${CELL_W}">
+        ${name}${lv?'<br><span style="color:#D97706;font-size:9px">休暇</span>':''}
+      </th>`;
+    });
+  });
+  html+=`</tr></thead><tbody>`;
+
+  // データ行: 時間ごと
+  sortedTimes.forEach(time=>{
+    html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">${time}</td>`;
+    days.forEach(d=>{
+      const ds=dateStr(d);
+      const dow=d.getDay();
+      const dayOff=isDayOff(ds);
+      THERAPISTS.forEach((th,ti)=>{
+        const hasDef=slotDefsForDay(dow,th).includes(time);
+        const lv=isLeave(ds,th);
+        const off=dayOff||lv;
+
+        if(off||!hasDef){
+          // 休み or 枠なし
+          const bg=off?'#F3F4F6':'#FAFAFA';
+          html+=`<td style="border:1px solid #E5E7EB;background:${bg};padding:4px;text-align:center;min-width:${CELL_W}"></td>`;
+        } else {
+          ensureBookingShape(ds);
+          const pid=bookings[ds]?.[th]?.[time];
+          const status=bookingStatuses[ds]?.[th]?.[time]||'reserved';
+          if(pid&&patients[pid]){
+            // 予約あり
+            const name=patients[pid].name;
+            const stColor=status==='done'?'#D1FAE5':status==='cancelled'?'#FEE2E2':status==='transfer'?'#FEF3C7':'#fff';
+            const stLabel=status==='done'?'✓':status==='cancelled'?'✕':status==='transfer'?'振':'';
+            html+=`<td style="border:1px solid #D1D1D6;background:${stColor};padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableStatusModal('${ds}','${th}','${time}')">
+              <div style="font-size:11px;font-weight:600;line-height:1.3">${name}</div>
+              ${stLabel?`<div style="font-size:9px;color:#6B7280">${stLabel}</div>`:''}
+            </td>`;
+          } else {
+            // 空き枠
+            html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')">
+              <div style="font-size:10px;color:#1D4ED8">○</div>
+            </td>`;
+          }
+        }
+      });
+    });
+    html+=`</tr>`;
+  });
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+}
+
+function weekTableBookModal(ds,therapist,time){
+  const d=new Date(ds);
+  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">📅 代理予約</div>
+    <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:14px">担当：${therapist==='tanaka'?'PT 田中':'PT 深澤'}</p>
+    <div class="input-group"><label>患者IDを入力</label>
+      <input type="text" id="wt-pid" placeholder="例：yt235485" autocomplete="off" autocapitalize="none" style="letter-spacing:1px">
+    </div>
+    <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-block" onclick="closeModal()">戻る</button>
+      <button class="btn btn-primary btn-block" id="wt-submit" onclick="weekTableDoBook('${ds}','${therapist}','${time}')">予約する</button>
+    </div>`);
+}
+async function weekTableDoBook(ds,therapist,time){
+  const pid=document.getElementById('wt-pid').value.trim().toLowerCase();
+  const err=document.getElementById('wt-err');
+  const btn=document.getElementById('wt-submit');
+  if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
+  btn.disabled=true;btn.textContent='処理中...';
+  const r=await dbBookSlot(ds,therapist,time,pid);
+  btn.disabled=false;btn.textContent='予約する';
+  if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
+  const p=patients[pid];
+  const d=new Date(ds);
+  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${time}（${therapist==='tanaka'?'PT田中':'PT深澤'}）に予約【管理者】`,'admin');
+  closeModal();renderWeekTable();
+  showToast(`${p.name} さんの予約を登録しました`,'#34C759');
+}
+
+function weekTableStatusModal(ds,therapist,time){
+  const pid=bookings[ds]?.[therapist]?.[time];
+  if(!pid)return;
+  const p=patients[pid];
+  const d=new Date(ds);
+  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const status=bookingStatuses[ds]?.[therapist]?.[time]||'reserved';
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">予約詳細</div>
+    <p style="font-size:14px;font-weight:600;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">${therapist==='tanaka'?'PT 田中':'PT 深澤'} ／ ${p?p.name:'不明'}</p>
+    <div class="status-btns" style="margin-bottom:14px">
+      <button class="btn btn-sm btn-green" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','done')" ${status==='done'?'disabled':''}>実施済</button>
+      <button class="btn btn-sm btn-orange" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','transfer')" ${status==='transfer'?'disabled':''}>振替</button>
+      <button class="btn btn-sm btn-danger" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','cancelled')" ${status==='cancelled'?'disabled':''}>キャンセル</button>
+    </div>
+    <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
+}
+async function wtUpdateStatus(ds,therapist,time,status){
+  const ok=await dbUpdateStatus(ds,therapist,time,status);
+  if(!ok){showToast('更新に失敗しました');return;}
+  closeModal();renderWeekTable();
+  showToast({done:'実施済',transfer:'振替',cancelled:'キャンセル'}[status]+'に変更しました','#34C759');
+}
+
+// ---- PT LEAVE ----
+let leaveFilter='tanaka';
+function selectLeaveFilter(th){
+  leaveFilter=th;
+  document.getElementById('lv-btn-t').className='th-btn'+(th==='tanaka'?' active-t':'');
+  document.getElementById('lv-btn-f').className='th-btn'+(th==='fukasawa'?' active-f':'');
+  renderLeaves(th);
+}
+function renderLeaves(th){
+  leaveFilter=th;
+  const el=document.getElementById('leave-list');
+  if(!el)return;
+  const list=leaveData.filter(l=>l.therapist===th).sort((a,b)=>a.leave_date.localeCompare(b.leave_date));
+  if(!list.length){el.innerHTML='<div class="empty">休暇の登録はありません</div>';return;}
+  el.innerHTML=list.map(l=>{
+    const d=new Date(l.leave_date);
+    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    return `<div class="card" style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <span style="font-size:14px;font-weight:500">${m}月${day}日（${wd}）</span>
+        <span class="badge badge-warn" style="margin-left:8px">${l.label||'年休'}</span>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deleteLeave(${l.id},'${l.therapist}','${l.leave_date}')">削除</button>
+    </div>`;
+  }).join('');
+}
+async function addLeave(){
+  const th=document.getElementById('lv-th').value;
+  const ds=document.getElementById('lv-date').value;
+  const label=document.getElementById('lv-label').value;
+  if(!ds){showToast('日付を選択してください');return;}
+  const {data,error}=await sb.from('therapist_leaves').upsert({therapist:th,leave_date:ds,label},{onConflict:'therapist,leave_date'}).select().single();
+  if(error){showToast('追加に失敗しました（同じ日が既に登録済みの可能性があります）');return;}
+  if(leaves[th])leaves[th].add(ds);
+  // update leaveData
+  leaveData=leaveData.filter(l=>!(l.therapist===th&&l.leave_date===ds));
+  leaveData.push(data);
+  renderLeaves(th);renderWeekTable();updateLastUpdated();
+  await dbLog('admin','add_leave',`${th==='tanaka'?'PT田中':'PT深澤'} ${ds} ${label}`);
+  showToast('休暇を追加しました','#34C759');
+}
+async function deleteLeave(id,th,ds){
+  if(!confirm('この休暇設定を削除しますか？'))return;
+  const {error}=await sb.from('therapist_leaves').delete().eq('id',id);
+  if(error){showToast('削除に失敗しました');return;}
+  if(leaves[th])leaves[th].delete(ds);
+  leaveData=leaveData.filter(l=>l.id!==id);
+  renderLeaves(th);renderWeekTable();updateLastUpdated();
 }
 
 // ---- PUBLIC SLOTS ----
@@ -1151,6 +1443,7 @@ function adminLogin(){
     document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
     renderNotifications();renderDeadline();renderSettingsDisplay();
     renderTodaySchedule('tanaka');
+    weekTableOffset=0;
     document.getElementById('cn-name').value=clinicName;
     document.getElementById('s-start').value=settings.start;
     document.getElementById('s-end').value=settings.end;
