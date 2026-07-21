@@ -615,9 +615,23 @@ function showToast(msg,color='#1C1C1E'){
 
 // ---- LOAD ----
 async function loadAllData(){
+  // 並列でまとめて取得（速度改善）
+  const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
+
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes]=await Promise.all([
+    sb.from('system_settings').select('*'),
+    sb.from('slot_definitions').select('*').eq('is_active',true),
+    sb.from('holidays').select('holiday_date'),
+    sb.from('therapist_leaves').select('*'),
+    sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
+    sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status')
+      .gte('booking_date',from).lte('booking_date',to),
+    sb.from('notifications').select('id,message,created_at')
+      .eq('dismissed',false).order('created_at',{ascending:false}).limit(20),
+  ]);
+
   // settings
-  const {data:sr}=await sb.from('system_settings').select('*');
-  (sr||[]).forEach(r=>{
+  (srRes.data||[]).forEach(r=>{
     if(r.key==='clinic_name')clinicName=r.value;
     if(r.key==='admin_password')ADMIN_PW=r.value;
     if(r.key==='reception_start')settings.start=r.value;
@@ -635,42 +649,30 @@ async function loadAllData(){
   });
 
   // slot definitions
-  const {data:sd}=await sb.from('slot_definitions').select('*').eq('is_active',true);
-  slotDefs=sd||[];
+  slotDefs=sdRes.data||[];
 
   // holidays
-  const {data:hd}=await sb.from('holidays').select('holiday_date');
-  holidays=new Set((hd||[]).map(h=>h.holiday_date));
+  holidays=new Set((hdRes.data||[]).map(h=>h.holiday_date));
 
-  // therapist leaves: {therapist: Set of date strings}
-  const {data:ld}=await sb.from('therapist_leaves').select('*');
+  // therapist leaves
   leaves={tanaka:new Set(),fukasawa:new Set()};
   leaveData=[];
-  (ld||[]).forEach(l=>{
+  (ldRes.data||[]).forEach(l=>{
     if(leaves[l.therapist])leaves[l.therapist].add(l.leave_date);
     leaveData.push(l);
   });
 
   // patients
-  const {data:pd}=await sb.from('patients').select('*');
   patients={};
-  (pd||[]).forEach(p=>{
+  (pdRes.data||[]).forEach(p=>{
     patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
       disease:p.disease||'',therapist:p.therapist||'tanaka',
       deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),note:p.note||'',history:[]};
   });
 
-  // visit history
-  const {data:vh}=await sb.from('visit_history').select('*');
-  (vh||[]).forEach(h=>{if(patients[h.patient_id])patients[h.patient_id].history.push({date:h.visit_date});});
-  Object.values(patients).forEach(p=>p.history.sort((a,b)=>b.date.localeCompare(a.date)));
-
-  // bookings (past 30 days + next 60 days)
-  const from=dateStr(addDays(TODAY,-30)),to=dateStr(addDays(TODAY,60));
-  const {data:br}=await sb.from('bookings').select('*')
-    .gte('booking_date',from).lte('booking_date',to);
+  // bookings
   bookings={};bookingStatuses={};
-  (br||[]).forEach(b=>{
+  (brRes.data||[]).forEach(b=>{
     if(!bookings[b.booking_date])bookings[b.booking_date]={tanaka:{},fukasawa:{}};
     if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={tanaka:{},fukasawa:{}};
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
@@ -680,9 +682,7 @@ async function loadAllData(){
   });
 
   // notifications
-  const {data:nd}=await sb.from('notifications').select('*')
-    .eq('dismissed',false).order('created_at',{ascending:false}).limit(30);
-  notifications=(nd||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at)}));
+  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at)}));
 }
 
 function fmtTime(iso){
