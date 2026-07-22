@@ -124,6 +124,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .log-time{font-size:10px;color:#C7C7CC;margin-top:2px}
 /* ステータスボタン */
 .status-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+/* 管理者タブ2行グリッド */
+.tab2{padding:10px 4px;font-size:12px;cursor:pointer;color:#8E8E93;text-align:center;font-weight:500;min-height:40px;display:flex;align-items:center;justify-content:center;border-right:1px solid #E5E5EA;background:#fff}
+.tab2:last-child{border-right:none}
+.tab2.active{color:#007AFF;font-weight:600;background:#EFF6FF}
 </style>
 </head>
 <body>
@@ -281,20 +285,26 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div><div class="nav-title">管理者ダッシュボード</div><div class="nav-sub" id="admin-date-sub"></div></div>
     <button class="btn btn-sm" onclick="showScreen('s-top')">戻る</button>
   </div>
-  <div class="tab-bar">
-    <div class="tab active" onclick="switchTab('a','notify',this)">お知らせ</div>
-    <div class="tab" onclick="switchTab('a','weektable',this)">週間表</div>
-    <div class="tab" onclick="switchTab('a','calendar',this)">カレンダー</div>
-    <div class="tab" onclick="switchTab('a','schedule',this)">スケジュール</div>
-    <div class="tab" onclick="switchTab('a','status',this)">ステータス</div>
-    <div class="tab" onclick="switchTab('a','patients',this)">患者管理</div>
-    <div class="tab" onclick="switchTab('a','booking',this)">代理予約</div>
-    <div class="tab" onclick="switchTab('a','slots',this)">枠設定</div>
-    <div class="tab" onclick="switchTab('a','holidays',this)">休診日</div>
-    <div class="tab" onclick="switchTab('a','leaves',this)">PT休暇</div>
-    <div class="tab" onclick="switchTab('a','logs',this)">操作ログ</div>
-    <div class="tab" onclick="switchTab('a','deadline',this)">期限</div>
-    <div class="tab" onclick="switchTab('a','settings',this)">設定</div>
+  <div style="background:#fff;border-bottom:1px solid #E5E5EA">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E5EA">
+      <div class="tab2 active" onclick="switchTab('a','notify',this)">お知らせ</div>
+      <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
+      <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
+      <div class="tab2" onclick="switchTab('a','schedule',this)">スケジュール</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E5EA">
+      <div class="tab2" onclick="switchTab('a','status',this)">ステータス</div>
+      <div class="tab2" onclick="switchTab('a','patients',this)">患者管理</div>
+      <div class="tab2" onclick="switchTab('a','booking',this)">代理予約</div>
+      <div class="tab2" onclick="switchTab('a','slots',this)">枠設定</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr)">
+      <div class="tab2" onclick="switchTab('a','holidays',this)">休診日</div>
+      <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
+      <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
+      <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
+      <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
+    </div>
   </div>
 
   <!-- お知らせ -->
@@ -802,7 +812,12 @@ function switchTab(prefix,name,el){
     ['notify','weektable','calendar','schedule','status','patients','booking','slots','holidays','leaves','logs','deadline','settings'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
-  el.closest('.tab-bar').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  // tab と tab2 両方のactiveを解除
+  if(prefix==='p'){
+    el.closest('.tab-bar').querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  } else {
+    document.querySelectorAll('#s-admin .tab2').forEach(t=>t.classList.remove('active'));
+  }
   el.classList.add('active');
   if(name==='mybook')renderMyBook();
   if(name==='reserve')renderReserve();
