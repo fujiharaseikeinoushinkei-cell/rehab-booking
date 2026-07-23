@@ -901,7 +901,7 @@ function renderPatientReminder(pid){
   const rEl=document.getElementById('p-remind');
   if(!rEl||!upcoming.length)return;
   const n=upcoming[0];
-  const d=new Date(n.date);
+  const d=parseLocalDate(n.date);
   const ds=dateStr(d);
   const todayStr=dateStr(TODAY),tomorrowStr=dateStr(TOMORROW);
   let label='';
@@ -1249,7 +1249,7 @@ function renderMyBook(){
     </div>`;
   } else {
     upcoming.forEach(u=>{
-      const d=new Date(u.date);
+      const d=parseLocalDate(u.date);
       const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
       const isToday=dateStr(d)===dateStr(TODAY);
       const isTomorrow=dateStr(d)===dateStr(TOMORROW);
@@ -1285,7 +1285,7 @@ function renderBanner(){
   const upcoming=getPatientUpcoming(currentPid);
   const el=document.getElementById('p-banner');
   if(upcoming.length){
-    const n=upcoming[0];const d=new Date(n.date);
+    const n=upcoming[0];const d=parseLocalDate(n.date);
     const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     el.innerHTML=`<div class="next-banner">
       <div class="next-banner-label">次回の予約</div>
@@ -1303,7 +1303,7 @@ function renderUpcoming(){
   let html='<div style="font-size:14px;font-weight:600;margin-bottom:10px">今後の予定一覧</div>';
   if(!upcoming.length){html+='<div class="empty">📅 予約はありません</div>';}
   else upcoming.forEach(u=>{
-    const d=new Date(u.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const d=parseLocalDate(u.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1"><div style="font-weight:600;font-size:15px">${m}月${day}日（${wd}） ${u.time}</div>
       <div style="font-size:12px;color:#8E8E93;margin-top:2px">${u.therapist==='tanaka'?'PT 田中':'PT 深澤'} ／ 40分 ／ 2単位</div></div>
@@ -1384,7 +1384,7 @@ function renderHistory(){
   const el=document.getElementById('ptab-history');
   let html='<div style="font-size:14px;font-weight:600;margin-bottom:10px">受診履歴</div>';
   p.history.forEach(h=>{
-    const d=new Date(h.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const d=parseLocalDate(h.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     html+=`<div class="card" style="display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:14px;font-weight:500">${m}月${day}日（${wd}）</span>
       <span class="badge badge-ok">✓ 実施済</span>
@@ -1395,7 +1395,7 @@ function renderHistory(){
 }
 
 function showCancelModal(date,time,therapist){
-  const d=new Date(date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const d=parseLocalDate(date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">⚠️ キャンセル確認</div>
     <p style="font-size:14px;color:#8E8E93;margin-bottom:14px">${m}月${day}日（${wd}） ${time}</p>
@@ -1515,7 +1515,7 @@ function renderCal(){
 }
 function calClick(ds){
   calSelected=ds;renderCal();
-  const d=new Date(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const d=parseLocalDate(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
   const appts=[];
   if(bookings[ds]){
     ['tanaka','fukasawa'].forEach(th=>{
@@ -1684,12 +1684,19 @@ async function deleteSlotDef(id){
 }
 
 // ---- HOLIDAYS ----
+// JST安全な日付パース（"YYYY-MM-DD"文字列をローカル時刻として解釈）
+function parseLocalDate(ds){
+  const [y,m,d]=ds.split('-').map(Number);
+  return new Date(y,m-1,d);
+}
+
 function renderHolidays(){
   const el=document.getElementById('holiday-list');
   if(!holidays.size){el.innerHTML='<div class="empty">休診日の登録はありません</div>';return;}
   let html='';
   [...holidays].sort((a,b)=>new Date(a)-new Date(b)).forEach(ds=>{
-    const d=new Date(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const d=parseLocalDate(ds);
+    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
     html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1"><span style="font-size:14px;font-weight:500">${m}月${day}日（${wd}）</span></div>
       <button class="btn btn-sm btn-danger" onclick="deleteHoliday('${ds}')">削除</button>
@@ -1747,18 +1754,54 @@ function renderDeadline(){
 // ---- PATIENT MANAGEMENT ----
 function renderPatientList(){
   const el=document.getElementById('patient-list');
-  let html='';
-  Object.entries(patients).forEach(([id,p])=>{
-    html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
-      <div style="flex:1;cursor:pointer" onclick="openEditPatient('${id}')">
-        <div style="font-weight:600;font-size:15px">${p.name} <span style="font-size:12px;font-weight:400;color:#8E8E93">${id}</span></div>
-        <div style="font-size:12px;color:#8E8E93;margin-top:2px">${p.disease} ／ ${p.therapist==='tanaka'?'PT 田中':'PT 深澤'}</div>
+  if(!Object.keys(patients).length){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
+
+  // 担当者ごとに分けてあいうえお順でソート
+  const sortByKana=(a,b)=>{
+    const ka=patients[a].kana||patients[a].name;
+    const kb=patients[b].kana||patients[b].name;
+    return ka.localeCompare(kb,'ja');
+  };
+  const tanakaIds=Object.keys(patients).filter(id=>patients[id].therapist==='tanaka').sort(sortByKana);
+  const fukasawaIds=Object.keys(patients).filter(id=>patients[id].therapist==='fukasawa').sort(sortByKana);
+
+  function patientCard(id){
+    const p=patients[id];
+    return `<div class="card" style="padding:10px 12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-weight:600;font-size:14px;flex:1;cursor:pointer" onclick="openEditPatient('${id}')">${p.name}</span>
       </div>
-      <button class="btn btn-sm" onclick="openEditPatient('${id}')">編集</button>
-      <button class="btn btn-sm btn-red" onclick="deletePatient('${id}')">削除</button>
+      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'}</div>
+      <div style="display:flex;gap:4px">
+        <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
+        <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
+      </div>
     </div>`;
-  });
-  if(!html)html='<div class="empty">患者が登録されていません</div>';
+  }
+
+  let html=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">`;
+
+  // PT田中列
+  html+=`<div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;background:#E0F0FF;border-radius:8px">
+      <span class="chip chip-tanaka">PT 田中</span>
+      <span style="font-size:12px;color:#004494;font-weight:600">${tanakaIds.length}名</span>
+    </div>`;
+  if(!tanakaIds.length) html+='<div style="font-size:12px;color:#8E8E93;padding:8px">登録なし</div>';
+  else tanakaIds.forEach(id=>html+=patientCard(id));
+  html+='</div>';
+
+  // PT深澤列
+  html+=`<div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;background:#EDE8FF;border-radius:8px">
+      <span class="chip chip-fukasawa">PT 深澤</span>
+      <span style="font-size:12px;color:#5E35B1;font-weight:600">${fukasawaIds.length}名</span>
+    </div>`;
+  if(!fukasawaIds.length) html+='<div style="font-size:12px;color:#8E8E93;padding:8px">登録なし</div>';
+  else fukasawaIds.forEach(id=>html+=patientCard(id));
+  html+='</div>';
+
+  html+='</div>';
   el.innerHTML=html;
 }
 function openAddPatient(){
