@@ -334,6 +334,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <button class="btn btn-sm" onclick="weekTableNav(-1)">‹ 前週</button>
       <span id="weektable-label" style="flex:1;text-align:center;font-size:14px;font-weight:600"></span>
       <button class="btn btn-sm" onclick="weekTableNav(1)">次週 ›</button>
+      <button class="btn btn-sm btn-orange" onclick="printWeekTable()">🖨 PDF</button>
     </div>
     <div style="padding:10px 8px;overflow-x:auto;-webkit-overflow-scrolling:touch">
       <div id="weektable-body"></div>
@@ -394,6 +395,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="openAddPatient()">＋ 新規登録</button>
       <button class="btn btn-sm" onclick="openExcelImport()">📋 CSV取込</button>
+      <button class="btn btn-sm btn-green" onclick="exportCSV()">⬇ CSV出力</button>
     </div>
     <div id="patient-list"></div>
   </div>
@@ -1031,14 +1033,21 @@ function renderWeekTable(){
 }
 
 function weekTableBookModal(ds,therapist,time){
-  const d=new Date(ds);
+  const d=parseLocalDate(ds);
   const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">📅 代理予約</div>
     <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
     <p style="font-size:13px;color:#8E8E93;margin-bottom:14px">担当：${therapist==='tanaka'?'PT 田中':'PT 深澤'}</p>
     <div class="input-group"><label>患者IDを入力</label>
-      <input type="text" id="wt-pid" placeholder="例：yt235485" autocomplete="off" autocapitalize="none" style="letter-spacing:1px">
+      <input type="text" id="wt-pid" placeholder="例：ft900001" autocomplete="off" autocapitalize="none" style="letter-spacing:1px">
+    </div>
+    <div class="input-group" style="margin-top:4px">
+      <label>🔁 同月分の同じ曜日・時間を自動登録</label>
+      <select id="wt-auto">
+        <option value="">今回のみ</option>
+        <option value="monthly">同月分すべて自動登録</option>
+      </select>
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -1051,15 +1060,55 @@ async function weekTableDoBook(ds,therapist,time){
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
+
+  // 月6回チェック
+  if(isOverDeadline(pid)){
+    const ym=ds.substring(0,7);
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      err.textContent='制度上月6回しか予約できません';
+      err.style.display='block';return;
+    }
+  }
+
   btn.disabled=true;btn.textContent='処理中...';
   const r=await dbBookSlot(ds,therapist,time,pid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
-  const d=new Date(ds);
+  const d=parseLocalDate(ds);
   await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${time}（${therapist==='tanaka'?'PT田中':'PT深澤'}）に予約【管理者】`,'admin');
+
+  // 同月自動登録
+  const auto=document.getElementById('wt-auto').value;
+  let autoCount=0;
+  if(auto==='monthly'){
+    const baseDate=parseLocalDate(ds);
+    const baseMonth=baseDate.getMonth();
+    const baseYear=baseDate.getFullYear();
+    for(let w=1;w<=5;w++){
+      const nd=addDays(baseDate,w*7);
+      if(nd.getMonth()!==baseMonth||nd.getFullYear()!==baseYear)break;
+      const nds=dateStr(nd);
+      if(isTherapistOff(nds,therapist)||nd.getDay()===0)continue;
+      if(isOverDeadline(pid)){
+        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
+        if(cnt>=6)break;
+      }
+      ensureBookingShape(nds);
+      if(!bookings[nds][therapist][time]){
+        const nr=await dbBookSlot(nds,therapist,time,pid);
+        if(nr.ok)autoCount++;
+      }
+    }
+  }
+
   closeModal();renderWeekTable();
-  showToast(`${p.name} さんの予約を登録しました`,'#34C759');
+  if(autoCount>0){
+    showToast(`${p.name} さんの予約を登録。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
+  } else {
+    showToast(`${p.name} さんの予約を登録しました`,'#34C759');
+  }
 }
 
 function weekTableStatusModal(ds,therapist,time){
@@ -1438,12 +1487,24 @@ async function doCancel(date,time,therapist){
 async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   const p=patients[currentPid];
   const btn=document.getElementById('res-submit');
+
+  // 期限切れ患者の月6回チェック
+  if(isOverDeadline(currentPid)){
+    const ym=fullDate.substring(0,7);
+    const cnt=countMonthlyBookings(currentPid,ym);
+    if(cnt>=6){
+      document.getElementById('res-err').textContent='制度上月6回しか予約できません';
+      document.getElementById('res-err').style.display='block';
+      return;
+    }
+  }
+
   btn.disabled=true;btn.textContent='処理中...';
   const r=await dbBookSlot(fullDate,therapist,time,currentPid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
   await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${time}（${therapist==='tanaka'?'PT田中':'PT深澤'}）に予約`,currentPid);
-  closeModal();renderBanner();renderUpcoming();renderReserve();
+  closeModal();renderBanner();renderMyBook();renderReserve();
   showToast(`${dateStr2} ${time} を予約しました`,'#34C759');
 }
 
@@ -1918,6 +1979,28 @@ async function doExcelImport(){
 }
 
 // ---- ADMIN BOOKING ----
+
+// 月間予約件数チェック（期限超過患者は月6回まで）
+function countMonthlyBookings(pid,yearMonth){
+  // yearMonth: "2025-07" 形式
+  let count=0;
+  Object.keys(bookings).forEach(date=>{
+    if(!date.startsWith(yearMonth))return;
+    ['tanaka','fukasawa'].forEach(th=>{
+      Object.entries(bookings[date][th]||{}).forEach(([t,bpid])=>{
+        if(bpid===pid && bookingStatuses[date]?.[th]?.[t]!=='cancelled') count++;
+      });
+    });
+  });
+  return count;
+}
+
+function isOverDeadline(pid){
+  const p=patients[pid];
+  if(!p||!p.deadline)return false;
+  return p.deadline < TODAY;
+}
+
 function renderBooking(){
   const sel=document.getElementById('bk-pid');
   let html='<option value="">患者を選択</option>';
@@ -1933,7 +2016,9 @@ function loadBookingPatient(){
   adminBookSelected=null;bkWeekOffset=0;
   if(!pid){document.getElementById('bk-info').style.display='none';document.getElementById('bk-slot-sec').style.display='none';return;}
   const p=patients[pid];
-  document.getElementById('bk-info').innerHTML=`<strong>${p.name}</strong>（${pid}）<br>疾患：${p.disease}　担当：${p.therapist==='tanaka'?'PT 田中':'PT 深澤'}<br>期限：${p.deadline.toISOString().split('T')[0]}`;
+  const dl=dateStr(p.deadline);
+  const over=isOverDeadline(pid);
+  document.getElementById('bk-info').innerHTML=`<strong>${p.name}</strong>（${pid}）<br>疾患：${p.disease}　担当：${p.therapist==='tanaka'?'PT 田中':'PT 深澤'}<br>期限：${dl}${over?'　<span class="badge badge-danger">期限切れ</span>':''}`;
   document.getElementById('bk-info').style.display='block';
   renderBkSlots();
   document.getElementById('bk-slot-sec').style.display='block';
@@ -1944,22 +2029,42 @@ function renderBkSlots(){
   const ws=monday(addDays(TODAY,bkWeekOffset*7));
   const we=addDays(ws,4);
   document.getElementById('bk-week-label').textContent=`${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
-  let html='';
+
+  // 時系列ソートした全スロットを収集
+  const allSlots=[];
   for(let i=0;i<5;i++){
     const d=addDays(ws,i);const ds=dateStr(d);
     if(d<TODAY)continue;
     const dow=d.getDay();
-    const times=slotDefsForDay(dow,p.therapist);
-    if(!times.length||isHoliday(ds)||dow===0)continue;
+    if(isTherapistOff(ds,p.therapist)||dow===0)continue;
+    const times=slotDefsForDay(dow,p.therapist).sort((a,b)=>{
+      const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
+      return(ah*60+am)-(bh*60+bm);
+    });
     ensureBookingShape(ds);
     times.forEach(t=>{
       if(!bookings[ds][p.therapist][t]){
-        const key=`${ds}_${t}`;
-        html+=`<div class="slot open" id="bks-${key}" onclick="selBkSlot('${ds}','${t}','${DAY_NAMES[dow]}','${d.getMonth()+1}/${d.getDate()}')">${DAY_NAMES[dow]}曜 ${d.getMonth()+1}/${d.getDate()} ${t}</div>`;
+        allSlots.push({ds,t,dow,d});
       }
     });
   }
-  document.getElementById('bk-slots').innerHTML=html||'<div style="font-size:13px;color:#8E8E93">この週の空き枠はありません</div>';
+  // 日付→時間の順でソート（すでに日付順→時間順）
+  if(!allSlots.length){
+    document.getElementById('bk-slots').innerHTML='<div style="font-size:13px;color:#8E8E93">この週の空き枠はありません</div>';
+    return;
+  }
+  let html='';
+  allSlots.forEach(({ds,t,dow,d})=>{
+    const key=`${ds}_${t}`;
+    const ym=ds.substring(0,7);
+    const cnt=isOverDeadline(pid)?countMonthlyBookings(pid,ym):0;
+    const limitOver=isOverDeadline(pid)&&cnt>=6;
+    html+=`<div class="slot ${limitOver?'full':'open'}" id="bks-${key}" 
+      onclick="${limitOver?`showToast('制度上月6回しか予約できません','#FF3B30')`:`selBkSlot('${ds}','${t}','${DAY_NAMES[dow]}','${d.getMonth()+1}/${d.getDate()}')`}">
+      ${DAY_NAMES[dow]}曜 ${d.getMonth()+1}/${d.getDate()} ${t}${limitOver?'　❌月6回上限':''}
+    </div>`;
+  });
+  document.getElementById('bk-slots').innerHTML=html;
 }
 function selBkSlot(ds,time,day,date){
   adminBookSelected={ds,time,day,date};
@@ -1972,29 +2077,103 @@ async function doAdminBooking(){
   if(!pid){showToast('患者を選択してください');return;}
   if(!adminBookSelected){showToast('空き枠を選択してください');return;}
   const p=patients[pid];const{ds,time,day,date}=adminBookSelected;
+
+  // 期限切れ患者の月6回チェック
+  if(isOverDeadline(pid)){
+    const ym=ds.substring(0,7);
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      showToast('制度上月6回しか予約できません','#FF3B30');
+      return;
+    }
+  }
+
   const r=await dbBookSlot(ds,p.therapist,time,pid);
   if(!r.ok){showToast(r.reason);renderBkSlots();return;}
   await dbLog('admin','book',`${p.name}（${pid}）${date} ${day}曜 ${time} に予約`);
   await dbAddNotification(`${p.name}（${pid}）${date} ${day}曜 ${time} に予約【管理者】`,'admin');
 
-  // 毎週自動予約
+  // 同月分のみ毎週自動予約
   const auto=document.getElementById('bk-auto').value;
   if(auto==='weekly'){
+    const baseDate=parseLocalDate(ds);
+    const baseMonth=baseDate.getMonth();
+    const baseYear=baseDate.getFullYear();
     let autoCount=0;
-    for(let w=1;w<=12;w++){
-      const nd=addDays(new Date(ds),w*7);const nds=dateStr(nd);
-      if(isHoliday(nds)||nd.getDay()===0)continue;
+    for(let w=1;w<=5;w++){// 最大5週先（同月内）
+      const nd=addDays(baseDate,w*7);
+      // 月が変わったら終了
+      if(nd.getMonth()!==baseMonth||nd.getFullYear()!==baseYear)break;
+      const nds=dateStr(nd);
+      if(isTherapistOff(nds,p.therapist)||nd.getDay()===0)continue;
+      // 期限切れ患者の月6回チェック
+      if(isOverDeadline(pid)){
+        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
+        if(cnt>=6)break;
+      }
       ensureBookingShape(nds);
       if(!bookings[nds][p.therapist][time]){
         const nr=await dbBookSlot(nds,p.therapist,time,pid);
         if(nr.ok)autoCount++;
       }
     }
-    showToast(`予約完了。毎週固定で${autoCount}回分も登録しました`,'#34C759');
+    showToast(`予約完了。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
   } else {
     showToast(`${p.name} さんの予約を ${date} ${time} に設定しました`,'#34C759');
   }
   renderNotifications();renderBkSlots();
+}
+
+// ---- CSV出力 ----
+function exportCSV(){
+  const header='ID,患者名,フリガナ,生年月日,性別,疾患名,担当,期限';
+  const rows=Object.entries(patients).map(([id,p])=>{
+    const dl=p.deadline?dateStr(p.deadline):'';
+    const th=p.therapist==='tanaka'?'tanaka':'fukasawa';
+    // CSVエスケープ（カンマ・改行を含む場合はダブルクォートで囲む）
+    const esc=v=>v&&(v.includes(',')||v.includes('"')||v.includes('\n'))?`"${v.replace(/"/g,'""')}"`:(v||'');
+    return [id,esc(p.name),esc(p.kana),p.dob||'',p.gender||'',esc(p.disease),th,dl].join(',');
+  });
+  const csv='\uFEFF'+header+'\n'+rows.join('\n'); // BOM付きUTF-8（Excel対応）
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  const now=new Date();
+  a.download=`患者データ_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`${Object.keys(patients).length}件のCSVを出力しました`,'#34C759');
+}
+
+// ---- 週間表PDF印刷 ----
+function printWeekTable(){
+  const label=document.getElementById('weektable-label').textContent;
+  const tableHTML=document.getElementById('weektable-body').innerHTML;
+  const printWin=window.open('','_blank','width=900,height=700');
+  printWin.document.write(`<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8">
+<title>週間スケジュール表 ${label}</title>
+<style>
+  body{font-family:-apple-system,'Hiragino Sans',sans-serif;font-size:11px;margin:16px}
+  h2{font-size:14px;margin-bottom:8px;color:#1C1C1E}
+  table{border-collapse:collapse;width:100%;font-size:10px}
+  th,td{border:1px solid #ccc;padding:4px 3px;text-align:center}
+  th{background:#1E3A5F;color:#fff;font-weight:600}
+  .empty-cell{background:#F3F4F6}
+  .booked-cell{background:#fff;font-weight:600}
+  .open-cell{background:#DBEAFE;color:#1D4ED8}
+  @media print{
+    @page{size:A4 landscape;margin:10mm}
+    body{margin:0}
+  }
+</style></head><body>
+<h2>📋 週間スケジュール表　${label}</h2>
+<p style="font-size:10px;color:#666;margin-bottom:8px">出力日時：${new Date().toLocaleString('ja-JP')}</p>
+${tableHTML}
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`);
+  printWin.document.close();
 }
 
 // ---- SETTINGS ----
