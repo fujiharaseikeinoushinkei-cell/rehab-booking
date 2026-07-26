@@ -717,13 +717,43 @@ function getPatientUpcoming(pid){
 
 // ---- DB OPS ----
 async function dbBookSlot(date,therapist,time,pid){
-  const {data:ex}=await sb.from('bookings').select('id').eq('booking_date',date)
+  // 重複チェック：同じ枠に既に予約があるか
+  const {data:ex}=await sb.from('bookings').select('id,patient_id').eq('booking_date',date)
     .eq('time_slot',time).eq('therapist',therapist).eq('status','reserved').maybeSingle();
-  if(ex)return{ok:false,reason:'この枠はすでに予約済みです'};
+  if(ex){
+    const existName=ex.patient_id&&patients[ex.patient_id]?patients[ex.patient_id].name:'別の患者';
+    return{ok:false,reason:`この時間枠（${time}）は${existName}さんが予約済みです。別の時間をお選びください。`};
+  }
+
+  // 同一患者が同じ日・同じ担当に既に予約していないか
+  const {data:sameDay}=await sb.from('bookings').select('id,time_slot').eq('booking_date',date)
+    .eq('patient_id',pid).eq('status','reserved').maybeSingle();
+  if(sameDay){
+    return{ok:false,reason:`${date} には既に ${sameDay.time_slot} の予約が入っています。1日に複数の予約はできません。`};
+  }
+
+  // 期限切れ患者の月6回チェック（念のためDB側でも確認）
+  if(isOverDeadline(pid)){
+    const ym=date.substring(0,7);
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      const [y,m]=ym.split('-');
+      return{ok:false,reason:`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`};
+    }
+  }
+
   const {error}=await sb.from('bookings').insert({
     booking_date:date,time_slot:time,therapist,patient_id:pid,status:'reserved'
   });
-  if(error){console.error(error);return{ok:false,reason:'予約処理に失敗しました'};}
+  if(error){
+    console.error(error);
+    // エラーコードに応じた詳細メッセージ
+    let reason='予約処理に失敗しました。';
+    if(error.code==='23505') reason='この時間枠は既に予約済みです（重複エラー）。画面を更新してもう一度お試しください。';
+    else if(error.code==='23503') reason='患者IDが正しく登録されていません。患者管理画面でご確認ください。';
+    else if(error.message) reason=`予約処理に失敗しました（${error.message}）`;
+    return{ok:false,reason};
+  }
   if(!bookings[date])bookings[date]={tanaka:{},fukasawa:{}};
   if(!bookings[date][therapist])bookings[date][therapist]={};
   bookings[date][therapist][time]=pid;
@@ -1038,10 +1068,16 @@ function weekTableBookModal(ds,therapist,time){
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">📅 代理予約</div>
     <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
-    <p style="font-size:13px;color:#8E8E93;margin-bottom:14px">担当：${therapist==='tanaka'?'PT 田中':'PT 深澤'}</p>
-    <div class="input-group"><label>患者IDを入力</label>
-      <input type="text" id="wt-pid" placeholder="例：ft900001" autocomplete="off" autocapitalize="none" style="letter-spacing:1px">
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">担当：${therapist==='tanaka'?'PT 田中':'PT 深澤'}</p>
+    <div class="input-group">
+      <label>患者を検索（ID・カタカナ・名前）</label>
+      <input type="text" id="wt-search" placeholder="例：ア　/ フジワラ　/ ft900001"
+        autocomplete="off" autocapitalize="none"
+        oninput="wtSearchPatient(this.value)"
+        style="letter-spacing:0.5px">
     </div>
+    <div id="wt-search-results" style="max-height:200px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;display:none;margin-bottom:12px"></div>
+    <div id="wt-selected-patient" style="display:none;background:#E8F4FF;border:1px solid #B3D4FF;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px"></div>
     <div class="input-group" style="margin-top:4px">
       <label>🔁 同月分の同じ曜日・時間を自動登録</label>
       <select id="wt-auto">
@@ -1055,10 +1091,78 @@ function weekTableBookModal(ds,therapist,time){
       <button class="btn btn-primary btn-block" id="wt-submit" onclick="weekTableDoBook('${ds}','${therapist}','${time}')">予約する</button>
     </div>`);
 }
+
+// 週間表モーダル用の選択済み患者ID
+let wtSelectedPid = null;
+
+function wtSearchPatient(query){
+  wtSelectedPid = null;
+  document.getElementById('wt-selected-patient').style.display='none';
+  const q = query.trim();
+  const resultsEl = document.getElementById('wt-search-results');
+  if(!q){resultsEl.style.display='none';return;}
+
+  // ID・カタカナ・漢字名で検索
+  const matched = Object.entries(patients).filter(([id,p])=>{
+    const kana = p.kana||'';
+    const name = p.name||'';
+    return id.includes(q.toLowerCase()) ||
+           kana.includes(q) ||
+           kana.startsWith(q) ||
+           name.includes(q);
+  });
+
+  if(!matched.length){
+    resultsEl.innerHTML='<div style="padding:10px 12px;font-size:13px;color:#8E8E93">該当する患者が見つかりません</div>';
+    resultsEl.style.display='block';
+    return;
+  }
+
+  // あいうえお順にソート
+  matched.sort((a,b)=>{
+    const ka=a[1].kana||a[1].name;
+    const kb=b[1].kana||b[1].name;
+    return ka.localeCompare(kb,'ja');
+  });
+
+  let html='';
+  matched.slice(0,20).forEach(([id,p])=>{
+    html+=`<div onclick="wtSelectPatient('${id}')"
+      style="padding:10px 14px;border-bottom:1px solid #F2F2F7;cursor:pointer;display:flex;align-items:center;gap:8px"
+      onmouseover="this.style.background='#F0F7FF'" onmouseout="this.style.background=''">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">${p.name}</div>
+        <div style="font-size:11px;color:#8E8E93">${p.kana||''} ／ ${id} ／ ${p.therapist==='tanaka'?'PT田中':'PT深澤'}</div>
+      </div>
+      <span class="chip ${p.therapist==='tanaka'?'chip-tanaka':'chip-fukasawa'}">${p.therapist==='tanaka'?'田中':'深澤'}</span>
+    </div>`;
+  });
+  if(matched.length>20) html+=`<div style="padding:8px 12px;font-size:11px;color:#8E8E93">他 ${matched.length-20}件…さらに絞り込んでください</div>`;
+  resultsEl.innerHTML=html;
+  resultsEl.style.display='block';
+}
+
+function wtSelectPatient(pid){
+  wtSelectedPid = pid;
+  const p = patients[pid];
+  document.getElementById('wt-search').value = `${p.name}（${pid}）`;
+  document.getElementById('wt-search-results').style.display='none';
+  const over = isOverDeadline(pid);
+  document.getElementById('wt-selected-patient').innerHTML=
+    `✅ <strong>${p.name}</strong>（${pid}）<br>
+     <span style="font-size:12px;color:#004494">疾患：${p.disease} ／ 期限：${dateStr(p.deadline)}${over?'　⚠️ 期限切れ':''}</span>`;
+  document.getElementById('wt-selected-patient').style.display='block';
+  document.getElementById('wt-err').style.display='none';
+}
 async function weekTableDoBook(ds,therapist,time){
-  const pid=document.getElementById('wt-pid').value.trim().toLowerCase();
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
+
+  if(!wtSelectedPid){
+    err.textContent='患者を検索して選択してください';
+    err.style.display='block';return;
+  }
+  const pid=wtSelectedPid;
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
 
   // 月6回チェック
@@ -1066,7 +1170,8 @@ async function weekTableDoBook(ds,therapist,time){
     const ym=ds.substring(0,7);
     const cnt=countMonthlyBookings(pid,ym);
     if(cnt>=6){
-      err.textContent='制度上月6回しか予約できません';
+      const m=ym.split('-')[1];
+      err.textContent=`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`;
       err.style.display='block';return;
     }
   }
@@ -1103,6 +1208,7 @@ async function weekTableDoBook(ds,therapist,time){
     }
   }
 
+  wtSelectedPid=null;
   closeModal();renderWeekTable();
   if(autoCount>0){
     showToast(`${p.name} さんの予約を登録。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
@@ -1868,7 +1974,13 @@ function renderPatientList(){
 function openAddPatient(){
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">＋ 新規患者登録</div>
-    <div class="input-group"><label>患者ID（半角英数字）</label><input type="text" id="np-id" placeholder="例：yt235485" autocapitalize="none"></div>
+    <div class="input-group">
+      <label>患者ID（半角英数字）</label>
+      <input type="text" id="np-id" placeholder="例：ft900001" autocapitalize="none"
+        oninput="checkPatientIdDuplicate(this.value)"
+        style="letter-spacing:0.5px">
+      <p id="np-id-warn" style="font-size:12px;margin-top:4px;display:none"></p>
+    </div>
     <div class="input-group"><label>患者名</label><input type="text" id="np-name" placeholder="山田 太郎"></div>
     <div class="input-group"><label>フリガナ</label><input type="text" id="np-kana" placeholder="ヤマダ タロウ"></div>
     <div class="input-group"><label>生年月日</label><input type="date" id="np-dob"></div>
@@ -1879,6 +1991,22 @@ function openAddPatient(){
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`);
+}
+
+function checkPatientIdDuplicate(val){
+  const id=val.trim().toLowerCase();
+  const warn=document.getElementById('np-id-warn');
+  if(!warn)return;
+  if(!id){warn.style.display='none';return;}
+  if(patients[id]){
+    warn.textContent=`⚠️ このIDはすでに使用されています（${patients[id].name}）`;
+    warn.style.color='#FF3B30';
+    warn.style.display='block';
+  } else {
+    warn.textContent='✓ このIDは使用可能です';
+    warn.style.color='#34C759';
+    warn.style.display='block';
+  }
 }
 async function saveNewPatient(){
   const id=document.getElementById('np-id').value.trim().toLowerCase();
