@@ -173,7 +173,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <span>予約の確認・変更・キャンセルはこちら</span>
       <span style="font-size:12px;opacity:.85;font-weight:400">患者IDでログイン</span>
     </button>
-    <button class="btn btn-block" onclick="showScreen('s-public')" style="font-size:16px;padding:14px;flex-direction:column;gap:2px;height:auto">
+    <button class="btn btn-block" onclick="openPublicSlots()" style="font-size:16px;padding:14px;flex-direction:column;gap:2px;height:auto">
       <span>空き状況の確認・予約の追加はこちら</span>
       <span style="font-size:12px;color:#8E8E93;font-weight:400">担当を選んで空き枠を確認</span>
     </button>
@@ -192,6 +192,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div style="width:60px"></div>
   </div>
   <div class="pad pt-12">
+    <div id="pub-closed-notice" style="display:none"></div>
     <div id="pub-th-select">
       <p style="font-size:15px;font-weight:600;margin-bottom:14px;text-align:center">担当を選んでください</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
@@ -793,6 +794,31 @@ function showToast(msg,color='#1C1C1E'){
   t.className='toast';t.style.background=color;t.textContent=msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(),3000);
+}
+
+// ---- 予約受付期間 ----
+// 開始日・終了日ともに未設定の場合は制限なし（従来通り常時受付）とする
+function isReceptionOpen(){
+  if(!settings.start && !settings.end) return true;
+  const ds=dateStr(TODAY);
+  if(settings.start && ds<settings.start) return false;
+  if(settings.end && ds>settings.end) return false;
+  return true;
+}
+function receptionClosedNoticeHTML(){
+  let msg='現在、予約の受付を行っておりません。';
+  const ds=dateStr(TODAY);
+  if(settings.end && ds>settings.end){
+    const d=parseLocalDate(settings.end);
+    msg=`現在${d.getMonth()+1}月${d.getDate()}日以降の受付はできません。`;
+  } else if(settings.start && ds<settings.start){
+    const d=parseLocalDate(settings.start);
+    msg=`予約受付は${d.getMonth()+1}月${d.getDate()}日からです。`;
+  }
+  return `<div class="notice" style="text-align:center;line-height:1.9">
+    ⚠️ ${msg}<br>不明点がある場合は直接お電話ください。<br>
+    <a href="tel:055-254-0511" style="color:#007AFF;font-weight:600;text-decoration:none">TEL.055-254-0511</a>
+  </div>`;
 }
 
 // ---- LOAD ----
@@ -1543,7 +1569,20 @@ async function deleteLeave(id,th,ds){
 }
 
 // ---- PUBLIC SLOTS ----
+function openPublicSlots(){
+  showScreen('s-public');
+  renderPublicScreenState();
+}
+function renderPublicScreenState(){
+  const closed=!isReceptionOpen();
+  const noticeEl=document.getElementById('pub-closed-notice');
+  noticeEl.style.display=closed?'block':'none';
+  noticeEl.innerHTML=closed?receptionClosedNoticeHTML():'';
+  document.getElementById('pub-th-select').style.display=closed?'none':(pubTherapist?'none':'block');
+  document.getElementById('pub-slots-wrap').style.display=closed?'none':(pubTherapist?'block':'none');
+}
 function pubSelectTherapist(t){
+  if(!isReceptionOpen())return;
   pubTherapist=t;pubWeekOffset=0;
   document.getElementById('pub-card-t').classList.toggle('active',t==='tanaka');
   document.getElementById('pub-card-f').classList.toggle('active',t==='fukasawa');
@@ -1617,6 +1656,7 @@ async function pubDoBook(fullDate,time,dateStr2,dayLabel){
   const pid=document.getElementById('pub-pid').value.trim().toLowerCase();
   const err=document.getElementById('pub-book-err');
   const btn=document.getElementById('pub-submit');
+  if(!isReceptionOpen()){err.textContent='受付期間外のため予約できません';err.style.display='block';return;}
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
   btn.disabled=true;btn.textContent='処理中...';
   const normTime=normalizeTime(time);
@@ -1725,6 +1765,10 @@ function renderUpcoming(){
 function renderReserve(){
   const el=document.getElementById('ptab-reserve');
   const p=patients[currentPid];
+  if(!isReceptionOpen()){
+    el.innerHTML=`<div class="pad pt-12">${receptionClosedNoticeHTML()}</div>`;
+    return;
+  }
   el.innerHTML=`<div class="pad pt-12">
     <div class="notice-blue" style="margin-bottom:14px">受付期間：${settings.start}〜${settings.end}（${settings.tstart}〜${settings.tend}）</div>
     <p style="font-size:14px;font-weight:600;margin-bottom:12px">担当を選んでから空き枠を選択</p>
@@ -1851,6 +1895,12 @@ async function doCancel(date,time,therapist){
 async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   const p=patients[currentPid];
   const btn=document.getElementById('res-submit');
+
+  if(!isReceptionOpen()){
+    document.getElementById('res-err').textContent='受付期間外のため予約できません';
+    document.getElementById('res-err').style.display='block';
+    return;
+  }
 
   // 期限切れ患者の月6回チェック
   if(isOverDeadline(currentPid)){
