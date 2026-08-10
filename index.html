@@ -848,21 +848,23 @@ async function dbBookSlot(date,therapist,time,pid){
   const normTime=normalizeTime(time);
   console.log('予約開始',{booking_date:date,therapist,time_slot:normTime,patient_id:pid});
 
-  // 重複チェック：DBから最新データで確認（booking_date+time_slot+therapist+status='reserved'のみ）
-  // time_slotはDB上で "9:10" or "09:10" の両方の可能性があるためOR検索
+  // 既存レコードを「ステータス問わず」取得する
+  // （cancelled/done/transferの行も含めて確認する。これらの行は削除せずDBに残っているため、
+  //   time_slotの組み合わせに対するユニーク制約に抵触しないよう、INSERTではなくUPDATEで再利用する）
   const {data:exRows,error:exErr}=await sb.from('bookings')
-    .select('id,patient_id,time_slot')
+    .select('id,patient_id,time_slot,status')
     .eq('booking_date',date)
-    .eq('therapist',therapist)
-    .eq('status','reserved');
+    .eq('therapist',therapist);
   if(exErr) console.warn('重複チェックエラー',exErr);
-  
-  // 取得結果の時間を正規化して比較
-  const duplicate=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
-  console.log('重複チェック結果',{duplicate_record:duplicate, checked_time:normTime, all_slots:(exRows||[]).map(r=>r.time_slot)});
-  if(duplicate){
-    const existName=duplicate.patient_id&&patients[duplicate.patient_id]
-      ?patients[duplicate.patient_id].name:'別の患者';
+
+  // 取得結果の時間を正規化して比較し、同じ枠の既存行を探す
+  const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
+  console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
+
+  // すでに「予約済み（reserved）」の行があれば拒否
+  if(existing && existing.status==='reserved'){
+    const existName=existing.patient_id&&patients[existing.patient_id]
+      ?patients[existing.patient_id].name:'別の患者';
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さんが予約済みです。別の時間をお選びください。`};
   }
 
@@ -876,11 +878,25 @@ async function dbBookSlot(date,therapist,time,pid){
     }
   }
 
-  const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:'reserved'};
-  console.log('INSERT実行',insertData);
-  const {data:inserted,error}=await sb.from('bookings').insert(insertData).select();
+  let inserted,error;
+  if(existing){
+    // キャンセル済み・実施済み・振替済みなど、既に同じ枠の行が存在する場合は
+    // その行をUPDATEして再利用する（実施済み・振替済みの履歴は保持しない運用のため上書きしてよい）
+    console.log('既存行を再利用してUPDATE',{id:existing.id,prev_status:existing.status});
+    const r=await sb.from('bookings')
+      .update({patient_id:pid,status:'reserved'})
+      .eq('id',existing.id).select();
+    inserted=r.data;error=r.error;
+  } else {
+    // 該当枠のレコードが一つも無い場合のみ新規INSERT
+    const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:'reserved'};
+    console.log('INSERT実行',insertData);
+    const r=await sb.from('bookings').insert(insertData).select();
+    inserted=r.data;error=r.error;
+  }
+
   if(error){
-    console.error('予約INSERT失敗',{code:error.code,message:error.message,details:error.details,hint:error.hint});
+    console.error('予約処理失敗',{code:error.code,message:error.message,details:error.details,hint:error.hint});
     let reason=`予約処理に失敗しました（${error.message||error.code||'不明'}）`;
     if(error.code==='23505') reason='この時間枠は既に予約済みです。画面を更新して再度お試しください。';
     else if(error.code==='23503') reason='患者IDの照合に失敗しました。患者管理で登録を確認してください。';
