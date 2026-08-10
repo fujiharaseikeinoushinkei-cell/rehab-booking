@@ -561,6 +561,20 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <p id="s-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました</p>
     </div>
     <div class="card"><p style="font-size:13px;font-weight:600;color:#8E8E93;margin-bottom:6px">現在の設定</p><p id="s-display" style="font-size:14px;line-height:1.8"></p></div>
+
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">基本営業時間（曜日・週パターン）</div>
+      <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
+        曜日ごとに、月の第何週かによって営業状況を設定できます。<br>
+        「終日」＝通常営業（時間は「枠設定」タブで登録した枠に従う）／「午前のみ」＝14:00以降休診／「午後のみ」＝14:00より前休診／「休診」＝終日休診。<br>
+        祝日など特定の日だけを休診にしたい場合は「休診日」タブをご利用ください。
+      </p>
+      <div class="table-wrap">
+        <table id="bh-table" style="min-width:420px"></table>
+      </div>
+      <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="saveBusinessHours()">この内容で保存する</button>
+      <p id="bh-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました。各画面に反映されます</p>
+    </div>
   </div>
 </div><!-- end s-admin -->
 </div><!-- end app -->
@@ -606,6 +620,7 @@ let schedTherapist="tanaka",schedView="day",schedOffset=0;
 let calYear=TODAY.getFullYear(),calMonth=TODAY.getMonth(),calSelected=null;
 let adminBookSelected=null,bkWeekOffset=0,pubWeekOffset=0;
 let pubTherapist=null;
+let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
 
 // ---- HELPERS ----
 // dateStr: JSTローカル日付を YYYY-MM-DD 形式で返す（toISOStringはUTC基準なので使わない）
@@ -644,33 +659,64 @@ function isLeaveForSlot(ds,th,time){
 }
 
 // ---- 診療カレンダールール ----
-// 日曜始まり週番号（第1・3週=月〜金のみ、第2・4・5週=月〜土）
-// 木曜・土曜の午後（14:00以降）は休診
+// 曜日×「月の第何週か」の組み合わせごとに、営業状況（終日／午前のみ／午後のみ／休診）を
+// businessHoursMatrix で管理する。管理画面「設定」タブから編集可能。
 function getWeekNumberOfMonth(d){
   // その月の1日が何曜日か（日曜=0）
   const firstDay=new Date(d.getFullYear(),d.getMonth(),1).getDay();
   return Math.ceil((d.getDate()+firstDay)/7);
 }
 
-function isDayOff(ds){
-  if(isHoliday(ds))return true;
+// デフォルトの営業ルール
+// ・日曜：常に休診
+// ・木曜・土曜：第1・3週のみ休診／第2・4・5週は午前のみ診療
+// ・月火水金：常に終日営業
+function defaultBusinessHoursMatrix(){
+  const m={};
+  for(let dow=0;dow<=6;dow++){
+    for(let wn=1;wn<=5;wn++){
+      const key=`${dow}_${wn}`;
+      if(dow===0){
+        m[key]='closed';
+      } else if(dow===4||dow===6){
+        m[key]=(wn===1||wn===3)?'closed':'am';
+      } else {
+        m[key]='full';
+      }
+    }
+  }
+  return m;
+}
+
+// 'full'（終日）/ 'am'（午前のみ）/ 'pm'（午後のみ）/ 'closed'（休診）
+function getBusinessStatus(ds){
   const d=parseLocalDate(ds);
   const dow=d.getDay();
-  if(dow===0)return true; // 日曜休み
-  if(dow===6){ // 土曜は第1・3週のみ休み
-    const wn=getWeekNumberOfMonth(d);
-    if(wn===1||wn===3)return true;
-  }
-  return false;
+  const wn=getWeekNumberOfMonth(d);
+  const key=`${dow}_${wn}`;
+  return businessHoursMatrix[key]||'full';
+}
+
+function isDayOff(ds){
+  if(isHoliday(ds))return true;
+  return getBusinessStatus(ds)==='closed';
 }
 
 function isAfternoonOff(ds,time){
-  // 木曜・土曜の14:00以降は休診
-  const d=parseLocalDate(ds);
-  const dow=d.getDay();
-  if(dow!==4&&dow!==6)return false; // 木・土以外はOK
+  // 「午前のみ」設定の日は14:00以降が休診
+  const status=getBusinessStatus(ds);
+  if(status!=='am')return false;
   const [h]=time.split(':').map(Number);
   return h>=14;
+}
+
+function isMorningOff(ds,time){
+  // 「午後のみ」設定の日は14:00より前が休診
+  const status=getBusinessStatus(ds);
+  if(status!=='pm')return false;
+  const [h,m]=time.split(':').map(Number);
+  const mins=h*60+(m||0);
+  return mins<840;
 }
 
 function isTherapistOff(ds,th){
@@ -685,6 +731,7 @@ function isTherapistOff(ds,th){
 function isSlotAvailable(ds,time,th){
   if(isDayOff(ds))return false;
   if(isAfternoonOff(ds,time))return false;
+  if(isMorningOff(ds,time))return false;
   // 休診日の時間帯チェック
   if(isHolidayPeriodOff(ds,time))return false;
   // PT休暇チェック（th指定時）
@@ -773,6 +820,13 @@ async function loadAllData(){
     if(r.key==='reception_end')settings.end=r.value;
     if(r.key==='reception_time_start')settings.tstart=r.value;
     if(r.key==='reception_time_end')settings.tend=r.value;
+    if(r.key==='business_hours_matrix'){
+      try{
+        const parsed=JSON.parse(r.value);
+        // デフォルトとマージ（新しい曜日・週パターンが増えても欠損しないように）
+        businessHoursMatrix=Object.assign(defaultBusinessHoursMatrix(),parsed);
+      }catch(e){console.warn('営業時間設定の読み込みに失敗しました',e);}
+    }
     if(r.key==='last_updated'){
       try{
         const d=new Date(r.value);
@@ -1044,6 +1098,7 @@ function switchTab(prefix,name,el){
   if(name==='leaves'){leaveFilter='tanaka';renderLeaves('tanaka');}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
+  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();}
 }
 
 let todayTherapist='tanaka';
@@ -2098,10 +2153,42 @@ async function addSlotDef(){
   const timeVal=document.getElementById('slot-time').value;
   const th=document.getElementById('slot-th').value;
   if(!timeVal){showToast('時間を入力してください');return;}
-  const time=timeVal.replace(':','時').replace(/^(\d+)時(\d+)$/,(_,h,m)=>`${parseInt(h)}:${m}`);
   const fmtTime=timeVal.split(':').map((v,i)=>i===0?parseInt(v):v).join(':');
-  const {data,error}=await sb.from('slot_definitions').insert({day_of_week:dow,time_slot:fmtTime,therapist:th}).select().single();
-  if(error){showToast('追加に失敗しました（同じ枠が既に存在する可能性があります）');return;}
+  const normTime=normalizeTime(fmtTime);
+
+  // 既存レコードを有効/無効問わず確認する
+  // （「削除」は論理削除(is_active=false)のためレコード自体はDBに残っており、
+  //   そのままINSERTするとユニーク制約(day_of_week,time_slot,therapist)に抵触して失敗するため）
+  const {data:exRows,error:exErr}=await sb.from('slot_definitions')
+    .select('id,time_slot,is_active')
+    .eq('day_of_week',dow)
+    .eq('therapist',th);
+  if(exErr) console.warn('枠の重複チェックエラー',exErr);
+  const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
+
+  if(existing && existing.is_active){
+    showToast('この枠は既に登録されています');
+    return;
+  }
+
+  let data,error;
+  if(existing){
+    // 論理削除済みの枠があれば再度有効化して再利用する
+    const r=await sb.from('slot_definitions')
+      .update({is_active:true,time_slot:fmtTime})
+      .eq('id',existing.id).select().single();
+    data=r.data;error=r.error;
+  } else {
+    const r=await sb.from('slot_definitions').insert({day_of_week:dow,time_slot:fmtTime,therapist:th}).select().single();
+    data=r.data;error=r.error;
+  }
+
+  if(error){
+    console.error('枠の追加に失敗',error);
+    showToast(`追加に失敗しました（${error.message||error.code||'不明'}）`);
+    return;
+  }
+  slotDefs=slotDefs.filter(s=>s.id!==data.id);
   slotDefs.push(data);
   renderSlotDefs();updateLastUpdated();
   showToast('枠を追加しました','#34C759');
@@ -2743,6 +2830,59 @@ async function saveSettings(){
 }
 function renderSettingsDisplay(){
   document.getElementById('s-display').innerHTML=`受付期間：${settings.start} 〜 ${settings.end}<br>受付時間：${settings.tstart} 〜 ${settings.tend}`;
+}
+
+// ---- 基本営業時間（曜日×週パターン）設定 ----
+function renderBusinessHoursTable(){
+  const el=document.getElementById('bh-table');
+  if(!el)return;
+  const dowLabels=['日','月','火','水','木','金','土'];
+  const statusOptions=[
+    {v:'full',label:'終日'},
+    {v:'am',label:'午前のみ'},
+    {v:'pm',label:'午後のみ'},
+    {v:'closed',label:'休診'},
+  ];
+  let html='<thead><tr><th style="padding:6px 4px;background:#F9FAFB;font-size:11px">曜日</th>';
+  for(let w=1;w<=5;w++)html+=`<th style="padding:6px 4px;background:#F9FAFB;text-align:center;font-size:11px">第${w}週</th>`;
+  html+='</tr></thead><tbody>';
+  for(let dow=0;dow<=6;dow++){
+    html+=`<tr><td style="padding:6px 4px;font-weight:600;font-size:12px;white-space:nowrap">${dowLabels[dow]}曜</td>`;
+    for(let w=1;w<=5;w++){
+      const key=`${dow}_${w}`;
+      const val=businessHoursMatrix[key]||'full';
+      html+=`<td style="padding:3px;text-align:center">
+        <select id="bh-${key}" style="min-height:32px;padding:4px 4px;font-size:11px">`;
+      statusOptions.forEach(o=>{
+        html+=`<option value="${o.v}" ${val===o.v?'selected':''}>${o.label}</option>`;
+      });
+      html+=`</select></td>`;
+    }
+    html+='</tr>';
+  }
+  html+='</tbody>';
+  el.innerHTML=html;
+}
+
+async function saveBusinessHours(){
+  const newMatrix={};
+  for(let dow=0;dow<=6;dow++){
+    for(let w=1;w<=5;w++){
+      const key=`${dow}_${w}`;
+      const sel=document.getElementById(`bh-${key}`);
+      newMatrix[key]=sel?sel.value:'full';
+    }
+  }
+  businessHoursMatrix=newMatrix;
+  await dbSaveSetting('business_hours_matrix',JSON.stringify(businessHoursMatrix));
+  await dbLog('admin','save_business_hours','基本営業時間設定を変更');
+  const msg=document.getElementById('bh-saved');
+  msg.style.display='block';
+  setTimeout(()=>msg.style.display='none',2500);
+  updateLastUpdated();
+  // 画面表示を更新（週間表・カレンダー・スケジュールに反映）
+  renderWeekTable();
+  showToast('営業ルールを保存しました','#34C759');
 }
 
 // ---- INIT ----
