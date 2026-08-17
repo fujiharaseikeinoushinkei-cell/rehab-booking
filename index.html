@@ -1601,11 +1601,15 @@ function weekTableStatusModal(ds,therapist,time){
     <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
 }
 async function wtUpdateStatus(ds,therapist,time,status){
+  const pid=bookings[ds]?.[therapist]?.[time];
+  const pName=pid&&patients[pid]?patients[pid].name:'不明';
   const ok=await dbUpdateStatus(ds,therapist,time,status);
   if(!ok){showToast('更新に失敗しました');return;}
+  const label={done:'実施済',transfer:'振替',cancelled:'キャンセル'}[status];
+  await dbAddNotification(`${pName} ${ds} ${time} を「${label}」に変更【管理者】`,'admin');
   await reloadBookings();
   closeModal();renderWeekTable();
-  showToast({done:'実施済',transfer:'振替',cancelled:'キャンセル'}[status]+'に変更しました','#34C759');
+  showToast(`${label}に変更しました`,'#34C759');
 }
 
 // ---- PT LEAVE ----
@@ -1983,13 +1987,14 @@ function showCancelModal(date,time,therapist){
     <div class="modal-title">⚠️ キャンセル確認</div>
     <p style="font-size:14px;color:#8E8E93;margin-bottom:14px">${m}月${day}日（${wd}） ${time}</p>
     <div class="input-group"><label>キャンセル理由</label>
-      <select id="cr" onchange="document.getElementById('cr-other').style.display=this.value==='その他'?'block':'none'">
+      <select id="cr" onchange="document.getElementById('cr-other').style.display=this.value==='その他'?'block':'none';document.getElementById('cr-err').style.display='none'">
         <option value="">選択してください</option>
         <option>体調不良</option><option>仕事のため</option><option>家庭の事情</option>
         <option>交通機関の遅延</option><option>その他</option>
       </select>
     </div>
-    <div id="cr-other" style="display:none" class="input-group"><label>詳細</label><input type="text" placeholder="理由を入力"></div>
+    <div id="cr-other" style="display:none" class="input-group"><label>詳細</label><input type="text" id="cr-other-text" placeholder="理由を入力"></div>
+    <p id="cr-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none">キャンセル理由を選択してください</p>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn btn-block" onclick="closeModal()">戻る</button>
       <button class="btn btn-danger btn-block" id="cancel-submit" onclick="doCancel('${date}','${time}','${therapist}')">キャンセル確定</button>
@@ -2011,11 +2016,19 @@ function showReserveModal(dayLabel,dateStr2,time,fullDate,therapist){
 async function doCancel(date,time,therapist){
   const p=patients[currentPid];
   const btn=document.getElementById('cancel-submit');
+  const crSel=document.getElementById('cr');
+  const reason=crSel?crSel.value:'';
+  if(!reason){
+    document.getElementById('cr-err').style.display='block';
+    return;
+  }
+  const reasonDetail=reason==='その他'?(document.getElementById('cr-other-text')?.value.trim()||''):'';
+  const reasonText=reasonDetail?`その他（${reasonDetail}）`:reason;
   btn.disabled=true;btn.textContent='処理中...';
   const ok=await dbCancelSlot(date,therapist,time);
   if(!ok){showToast('キャンセル処理に失敗しました');btn.disabled=false;btn.textContent='キャンセル確定';return;}
   const d=parseLocalDate(date);
-  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル`,currentPid);
+  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,currentPid);
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
