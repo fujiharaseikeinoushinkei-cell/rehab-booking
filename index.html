@@ -861,8 +861,9 @@ function showToast(msg,color='#1C1C1E'){
 }
 
 // ---- 予約受付期間 ----
-// 開始日・終了日ともに未設定の場合は日付の制限なし（従来通り常時受付）とする
-// 受付開始時間・終了時間が設定されている場合は、現在時刻がその範囲内かどうかも判定する
+// isReceptionOpen: 「今日」が受付開始日〜終了日の範囲内か（＋時間帯）＝予約機能自体を使える期間かどうか
+// isDateWithinReception: 予約しようとしている「診療日そのもの」が受付開始日〜終了日の範囲内かどうか
+// （受付終了日を過ぎた日付の予約枠を、期間内の今日から先の週で選べてしまわないようにするためのチェック）
 function isReceptionOpen(){
   const ds=dateStr(TODAY);
   if(settings.start && ds<settings.start) return false;
@@ -877,6 +878,11 @@ function isReceptionOpen(){
     const endMin=eh*60+(em||0);
     if(nowMin<startMin||nowMin>endMin) return false;
   }
+  return true;
+}
+function isDateWithinReception(ds){
+  if(settings.start && ds<settings.start) return false;
+  if(settings.end && ds>settings.end) return false;
   return true;
 }
 function receptionClosedNoticeHTML(){
@@ -1730,6 +1736,7 @@ function renderPublicSlots(){
     const d=addDays(ws,i);
     const ds=dateStr(d);
     if(d<TODAY)continue;
+    if(!isDateWithinReception(ds))continue;
     const dow=d.getDay();
     const times=slotDefsForDay(dow,pubTherapist);
     if(!times.length)continue;
@@ -1754,7 +1761,8 @@ function renderPublicSlots(){
     });
     html+='</div></div>';
   }
-  el.innerHTML=anyOpen?html:'<div class="empty">この週の空き枠はありません</div>';
+  const weekEndBeyondReception=settings.end&&dateStr(we)>settings.end;
+  el.innerHTML=anyOpen?html:(weekEndBeyondReception?`<div class="empty">この週以降は予約受付期間外です<br><span style="font-size:12px">受付終了日：${settings.end}</span></div>`:'<div class="empty">この週の空き枠はありません</div>');
 }
 
 function pubBookModal(dayLabel,dateStr2,time,fullDate){
@@ -1777,6 +1785,7 @@ async function pubDoBook(fullDate,time,dateStr2,dayLabel){
   const err=document.getElementById('pub-book-err');
   const btn=document.getElementById('pub-submit');
   if(!isReceptionOpen()){err.textContent='受付期間外のため予約できません';err.style.display='block';return;}
+  if(!isDateWithinReception(fullDate)){err.textContent='その日付は予約受付期間外です';err.style.display='block';return;}
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
   btn.disabled=true;btn.textContent='処理中...';
   const normTime=normalizeTime(time);
@@ -1927,6 +1936,7 @@ function renderResSlots(){
   for(let i=0;i<5;i++){
     const d=addDays(ws,i);const ds=dateStr(d);
     if(d<TODAY)continue;
+    if(!isDateWithinReception(ds))continue;
     const dow=d.getDay();
     const times=slotDefsForDay(dow,resTherapist);
     if(!times.length)continue;
@@ -1945,7 +1955,10 @@ function renderResSlots(){
     });
     html+='</div></div>';
   }
-  if(!anyOpen)html='<div class="empty">この週の空き枠はありません<br><span style="font-size:12px">「次週」ボタンで先の週を確認できます</span></div>';
+  const weekEndBeyondReception=settings.end&&dateStr(we)>settings.end;
+  if(!anyOpen)html=weekEndBeyondReception
+    ?`<div class="empty">この週以降は予約受付期間外です<br><span style="font-size:12px">受付終了日：${settings.end}</span></div>`
+    :'<div class="empty">この週の空き枠はありません<br><span style="font-size:12px">「次週」ボタンで先の週を確認できます</span></div>';
   wrap.innerHTML=html;wrap.style.display='block';
 }
 
@@ -2015,6 +2028,11 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
 
   if(!isReceptionOpen()){
     document.getElementById('res-err').textContent='受付期間外のため予約できません';
+    document.getElementById('res-err').style.display='block';
+    return;
+  }
+  if(!isDateWithinReception(fullDate)){
+    document.getElementById('res-err').textContent='その日付は予約受付期間外です';
     document.getElementById('res-err').style.display='block';
     return;
   }
