@@ -619,7 +619,7 @@ let patients={};
 let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
 let notifications=[];
-let settings={start:"",end:"",tstart:"09:00",tend:"12:00"};
+let settings={start:"",end:"",tstart:"",tend:""};
 let slotDefs=[];
 let holidays=new Set();
 let holidayData=[];   // 全休診日レコード（period情報含む）
@@ -861,12 +861,22 @@ function showToast(msg,color='#1C1C1E'){
 }
 
 // ---- 予約受付期間 ----
-// 開始日・終了日ともに未設定の場合は制限なし（従来通り常時受付）とする
+// 開始日・終了日ともに未設定の場合は日付の制限なし（従来通り常時受付）とする
+// 受付開始時間・終了時間が設定されている場合は、現在時刻がその範囲内かどうかも判定する
 function isReceptionOpen(){
-  if(!settings.start && !settings.end) return true;
   const ds=dateStr(TODAY);
   if(settings.start && ds<settings.start) return false;
   if(settings.end && ds>settings.end) return false;
+  if(settings.tstart && settings.tend){
+    const now=new Date();
+    const jstNow=new Date(now.getTime()+9*60*60*1000);
+    const nowMin=jstNow.getUTCHours()*60+jstNow.getUTCMinutes();
+    const [sh,sm]=settings.tstart.split(':').map(Number);
+    const [eh,em]=settings.tend.split(':').map(Number);
+    const startMin=sh*60+(sm||0);
+    const endMin=eh*60+(em||0);
+    if(nowMin<startMin||nowMin>endMin) return false;
+  }
   return true;
 }
 function receptionClosedNoticeHTML(){
@@ -878,6 +888,8 @@ function receptionClosedNoticeHTML(){
   } else if(settings.start && ds<settings.start){
     const d=parseLocalDate(settings.start);
     msg=`予約受付は${d.getMonth()+1}月${d.getDate()}日からです。`;
+  } else if(settings.tstart && settings.tend){
+    msg=`本日の予約受付時間は${settings.tstart}〜${settings.tend}です。時間内に改めてお試しください。`;
   }
   return `<div class="notice" style="text-align:center;line-height:1.9">
     ⚠️ ${msg}<br>不明点がある場合は直接お電話ください。<br>
@@ -1118,9 +1130,9 @@ async function reloadBookings(){
 
 
 async function dbAddNotification(text,operator='system'){
-  const {data,error}=await sb.from('notifications').insert({message:text}).select().single();
+  const {data,error}=await sb.from('notifications').insert({message:text,operator}).select().single();
   if(error)return;
-  notifications.unshift({id:data.id,text:data.message,time:'たった今'});
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator||operator});
   await sb.from('operation_logs').insert({operator,action:'notify',detail:text});
 }
 
@@ -1878,7 +1890,7 @@ function renderReserve(){
     return;
   }
   el.innerHTML=`<div class="pad pt-12">
-    <div class="notice-blue" style="margin-bottom:14px">受付期間：${settings.start}〜${settings.end}（${settings.tstart}〜${settings.tend}）</div>
+    <div class="notice-blue" style="margin-bottom:14px">受付期間：${settings.start||'指定なし'}〜${settings.end||'指定なし'}${(settings.tstart&&settings.tend)?`（${settings.tstart}〜${settings.tend}）`:''}</div>
     <p style="font-size:14px;font-weight:600;margin-bottom:12px">担当を選んでから空き枠を選択</p>
     <div id="res-th-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">${staffList.map(s=>`
       <div class="th-select-card ${p.therapist===s.id?'active':''}" data-staff-id="${s.id}" onclick="resSelectTherapist('${s.id}')">
@@ -3011,7 +3023,7 @@ async function saveSettings(){
   renderSettingsDisplay();updateLastUpdated();
 }
 function renderSettingsDisplay(){
-  document.getElementById('s-display').innerHTML=`受付期間：${settings.start} 〜 ${settings.end}<br>受付時間：${settings.tstart} 〜 ${settings.tend}`;
+  document.getElementById('s-display').innerHTML=`受付期間：${settings.start||'指定なし'} 〜 ${settings.end||'指定なし'}<br>受付時間：${(settings.tstart&&settings.tend)?`${settings.tstart} 〜 ${settings.tend}（時間帯制限あり）`:'指定なし（時間帯制限なし）'}`;
 }
 
 // ---- スタッフ管理（担当PT） ----
