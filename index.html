@@ -1699,15 +1699,11 @@ function renderPubTherapistCards(){
 }
 function renderPublicScreenState(){
   renderPubTherapistCards();
-  const closed=!isReceptionOpen();
-  const noticeEl=document.getElementById('pub-closed-notice');
-  noticeEl.style.display=closed?'block':'none';
-  noticeEl.innerHTML=closed?receptionClosedNoticeHTML():'';
-  document.getElementById('pub-th-select').style.display=closed?'none':(pubTherapist?'none':'block');
-  document.getElementById('pub-slots-wrap').style.display=closed?'none':(pubTherapist?'block':'none');
+  document.getElementById('pub-closed-notice').style.display='none';
+  document.getElementById('pub-th-select').style.display=pubTherapist?'none':'block';
+  document.getElementById('pub-slots-wrap').style.display=pubTherapist?'block':'none';
 }
 function pubSelectTherapist(t){
-  if(!isReceptionOpen())return;
   pubTherapist=t;pubWeekOffset=0;
   document.querySelectorAll('#pub-th-cards .th-select-card').forEach(card=>{
     card.classList.toggle('active',card.dataset.staffId===t);
@@ -1736,7 +1732,6 @@ function renderPublicSlots(){
     const d=addDays(ws,i);
     const ds=dateStr(d);
     if(d<TODAY)continue;
-    if(!isDateWithinReception(ds))continue;
     const dow=d.getDay();
     const times=slotDefsForDay(dow,pubTherapist);
     if(!times.length)continue;
@@ -1761,8 +1756,7 @@ function renderPublicSlots(){
     });
     html+='</div></div>';
   }
-  const weekEndBeyondReception=settings.end&&dateStr(we)>settings.end;
-  el.innerHTML=anyOpen?html:(weekEndBeyondReception?`<div class="empty">この週以降は予約受付期間外です<br><span style="font-size:12px">受付終了日：${settings.end}</span></div>`:'<div class="empty">この週の空き枠はありません</div>');
+  el.innerHTML=anyOpen?html:'<div class="empty">この週の空き枠はありません</div>';
 }
 
 function pubBookModal(dayLabel,dateStr2,time,fullDate){
@@ -1784,8 +1778,6 @@ async function pubDoBook(fullDate,time,dateStr2,dayLabel){
   const pid=document.getElementById('pub-pid').value.trim().toLowerCase();
   const err=document.getElementById('pub-book-err');
   const btn=document.getElementById('pub-submit');
-  if(!isReceptionOpen()){err.textContent='受付期間外のため予約できません';err.style.display='block';return;}
-  if(!isDateWithinReception(fullDate)){err.textContent='その日付は予約受付期間外です';err.style.display='block';return;}
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
   btn.disabled=true;btn.textContent='処理中...';
   const normTime=normalizeTime(time);
