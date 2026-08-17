@@ -330,6 +330,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
     <div style="padding:4px 12px 12px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#8E8E93">
       <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#DBEAFE;border-radius:2px;display:inline-block"></span>空き枠（クリックで予約）</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#FFE0B3;border-radius:2px;display:inline-block"></span>仮予約1〜5</span>
       <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#E5E7EB;border-radius:2px;display:inline-block"></span>休診・休暇</span>
     </div>
   </div>
@@ -656,6 +657,26 @@ function getStaffColor(id){
 function staffChipStyle(id){
   const c=getStaffColor(id);
   return `background:${c.bg};color:${c.fg}`;
+}
+
+// ---- 仮予約（枠だけ先に確保しておくための標準ダミー患者） ----
+const TENTATIVE_IDS=['kari1','kari2','kari3','kari4','kari5'];
+const TENTATIVE_NAMES={kari1:'仮予約1',kari2:'仮予約2',kari3:'仮予約3',kari4:'仮予約4',kari5:'仮予約5'};
+const TENTATIVE_BG='#FFE0B3';
+const TENTATIVE_FG='#8B4500';
+function isTentativePatient(pid){return TENTATIVE_IDS.includes(pid);}
+// 初回起動時、仮予約1〜5がpatientsテーブルに無ければ自動作成する
+// （担当は未設定のままにして、患者管理タブの一覧には表示されないようにする）
+async function ensureTentativePatients(){
+  for(const id of TENTATIVE_IDS){
+    if(patients[id])continue;
+    const newP={name:TENTATIVE_NAMES[id],kana:'',dob:'',gender:'男',disease:'仮予約枠',
+      therapist:'',deadline:new Date('2099-12-31'),note:'',history:[]};
+    try{
+      const ok=await dbAddPatient(id,newP);
+      if(ok)patients[id]=newP;
+    }catch(e){console.warn('仮予約患者の自動作成に失敗',id,e);}
+  }
 }
 // <select>要素にスタッフ一覧をoptionとして流し込む（selectedIdがあれば選択状態にする）
 function populateStaffSelect(selectId,selectedId){
@@ -1365,10 +1386,12 @@ function renderWeekTable(){
           const status=bookingStatuses[ds]?.[th]?.[time]||'';
           if(pid&&patients[pid]){
             const name=patients[pid].name;
-            const stColor=status==='done'?'#D1FAE5':status==='cancelled'?'#FEE2E2':status==='transfer'?'#FEF3C7':'#fff';
+            const tentative=isTentativePatient(pid);
+            const stColor=status==='done'?'#D1FAE5':status==='cancelled'?'#FEE2E2':status==='transfer'?'#FEF3C7':(tentative?TENTATIVE_BG:'#fff');
             const stLabel=status==='done'?'✓':status==='cancelled'?'✕':status==='transfer'?'振':'';
+            const nameStyle=(tentative&&status!=='done'&&status!=='cancelled'&&status!=='transfer')?`color:${TENTATIVE_FG};`:'';
             html+=`<td style="border:1px solid #D1D1D6;background:${stColor};padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableStatusModal('${ds}','${th}','${time}')">
-              <div style="font-size:11px;font-weight:600;line-height:1.3">${name}</div>
+              <div style="font-size:11px;font-weight:600;line-height:1.3;${nameStyle}">${name}</div>
               ${stLabel?`<div style="font-size:9px;color:#6B7280">${stLabel}</div>`:''}
             </td>`;
           } else {
@@ -1398,6 +1421,9 @@ function weekTableBookModal(ds,therapist,time){
         autocomplete="off" autocapitalize="none"
         oninput="wtSearchPatient(this.value)"
         style="letter-spacing:0.5px">
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${TENTATIVE_IDS.map(id=>`<button type="button" class="btn btn-sm" style="background:${TENTATIVE_BG};color:${TENTATIVE_FG};border-color:${TENTATIVE_BG}" onclick="wtSelectPatient('${id}')">${TENTATIVE_NAMES[id]}</button>`).join('')}
     </div>
     <div id="wt-search-results" style="max-height:200px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;display:none;margin-bottom:12px"></div>
     <div id="wt-selected-patient" style="display:none;background:#E8F4FF;border:1px solid #B3D4FF;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px"></div>
@@ -2404,7 +2430,7 @@ async function renderLogs(){
 // ---- DEADLINE ----
 function renderDeadline(){
   const tb=document.getElementById('dl-tb');
-  const rows=Object.keys(patients).map(id=>{const p=patients[id];const diff=Math.round((p.deadline-TODAY)/864e5);return{id,p,diff};}).sort((a,b)=>a.diff-b.diff);
+  const rows=Object.keys(patients).filter(id=>!isTentativePatient(id)).map(id=>{const p=patients[id];const diff=Math.round((p.deadline-TODAY)/864e5);return{id,p,diff};}).sort((a,b)=>a.diff-b.diff);
   let html='';
   rows.forEach(({id,p,diff})=>{
     let rc='',badge='';
@@ -2772,7 +2798,7 @@ async function doAdminBooking(){
 // ---- CSV出力 ----
 function exportCSV(){
   const header='ID,患者名,フリガナ,生年月日,性別,疾患名,担当,期限';
-  const rows=Object.entries(patients).map(([id,p])=>{
+  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)).map(([id,p])=>{
     const dl=p.deadline?dateStr(p.deadline):'';
     const th=p.therapist||'';
     // CSVエスケープ（カンマ・改行を含む場合はダブルクォートで囲む）
@@ -2788,7 +2814,7 @@ function exportCSV(){
   a.download=`患者データ_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
   a.click();
   URL.revokeObjectURL(url);
-  showToast(`${Object.keys(patients).length}件のCSVを出力しました`,'#34C759');
+  showToast(`${rows.length}件のCSVを出力しました`,'#34C759');
 }
 
 // ---- 週間表PDF印刷 ----
@@ -3107,6 +3133,7 @@ async function saveBusinessHours(){
 async function init(){
   try{
     await loadAllData();
+    await ensureTentativePatients();
     document.getElementById('top-clinic-name').textContent=clinicName;
     renderReminder();
     renderSettingsDisplay();
