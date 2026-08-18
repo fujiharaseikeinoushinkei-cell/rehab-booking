@@ -1104,15 +1104,28 @@ async function dbCancelSlot(date,therapist,time){
 
 async function dbUpdateStatus(date,therapist,time,status){
   const normTime=normalizeTime(time);
-  const {error}=await sb.from('bookings').update({status})
+  const {data,error}=await sb.from('bookings').update({status})
     .eq('booking_date',date).eq('therapist',therapist)
-    .or(`time_slot.eq.${normTime},time_slot.eq.${normTime.padStart(5,'0')}`);
-  if(error){console.error(error);return false;}
+    .or(`time_slot.eq.${normTime},time_slot.eq.${normTime.padStart(5,'0')}`)
+    .select();
+  if(error){console.error(error);return {ok:false,patientId:null};}
+  const patientId=(data&&data[0]&&data[0].patient_id)?data[0].patient_id:null;
   if(status!=='reserved'&&bookings[date]?.[therapist])bookings[date][therapist][normTime]=null;
   if(bookingStatuses[date]?.[therapist])bookingStatuses[date][therapist][normTime]=status;
   await reloadBookings();
   updateLastUpdated();
-  return true;
+  return {ok:true,patientId};
+}
+// ステータス変更対象の患者名を解決する（ローカルキャッシュに無ければDBへ問い合わせる）
+async function resolvePatientName(pid){
+  if(!pid)return '不明';
+  if(patients[pid]?.name)return patients[pid].name;
+  try{
+    const {data}=await sb.from('patients').select('name').eq('id',pid).single();
+    return data?.name||pid;
+  }catch(e){
+    return pid;
+  }
 }
 
 // bookingsのみ再読み込み（キャッシュ更新）
@@ -1601,10 +1614,9 @@ function weekTableStatusModal(ds,therapist,time){
     <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
 }
 async function wtUpdateStatus(ds,therapist,time,status){
-  const pid=bookings[ds]?.[therapist]?.[time];
-  const pName=pid&&patients[pid]?patients[pid].name:'不明';
-  const ok=await dbUpdateStatus(ds,therapist,time,status);
-  if(!ok){showToast('更新に失敗しました');return;}
+  const r=await dbUpdateStatus(ds,therapist,time,status);
+  if(!r.ok){showToast('更新に失敗しました');return;}
+  const pName=await resolvePatientName(r.patientId);
   const label={done:'実施済',transfer:'振替',cancelled:'キャンセル'}[status];
   await dbAddNotification(`${pName} ${ds} ${time} を「${label}」に変更【管理者】`,'admin');
   await reloadBookings();
@@ -2311,10 +2323,9 @@ function loadStatusSlots(){
   document.getElementById('status-slots').innerHTML=html||'<div class="empty">この日の予約枠はありません</div>';
 }
 async function updateStatus(date,therapist,time,status){
-  const pid=bookings[date]?.[therapist]?.[time];
-  const pName=pid&&patients[pid]?patients[pid].name:'不明';
-  const ok=await dbUpdateStatus(date,therapist,time,status);
-  if(!ok){showToast('更新に失敗しました');return;}
+  const r=await dbUpdateStatus(date,therapist,time,status);
+  if(!r.ok){showToast('更新に失敗しました');return;}
+  const pName=await resolvePatientName(r.patientId);
   const label={done:'実施済',transfer:'振替',cancelled:'キャンセル'}[status];
   await dbAddNotification(`${pName} ${date} ${time} を「${label}」に変更【管理者】`,'admin');
   loadStatusSlots();
