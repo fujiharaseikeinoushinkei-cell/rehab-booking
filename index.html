@@ -181,6 +181,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       🔒 管理者ログイン
     </button>
     <div class="notice">⚠️ <strong>注意：</strong>診察日と同日にリハビリの予約を行うことはできません。</div>
+    <div id="top-external-links" style="display:none;gap:12px;justify-content:center;padding-top:8px"></div>
   </div>
 </div>
 
@@ -575,6 +576,23 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
 
     <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">外部リンク設定</div>
+      <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
+        トップページ下部に表示するボタンのリンク先を設定します。空欄のままにすると、そのボタンは表示されません。
+      </p>
+      <div class="input-group">
+        <label>🏠 ホームページURL</label>
+        <input type="url" id="ext-homepage-url" placeholder="https://example.com" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="input-group">
+        <label>📷 InstagramのURL</label>
+        <input type="url" id="ext-instagram-url" placeholder="https://www.instagram.com/xxxxx" autocapitalize="none" autocomplete="off">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveExternalLinks()">保存する</button>
+      <p id="ext-links-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました</p>
+    </div>
+
+    <div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:6px">基本営業時間（曜日・週パターン）</div>
       <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
         曜日ごとに、月の第何週かによって営業状況を設定できます。<br>
@@ -620,6 +638,7 @@ let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
 let notifications=[];
 let settings={start:"",end:"",tstart:"",tend:""};
+let externalLinks={homepage:"",instagram:""};
 let slotDefs=[];
 let holidays=new Set();
 let holidayData=[];   // 全休診日レコード（period情報含む）
@@ -941,6 +960,8 @@ async function loadAllData(){
         if(Array.isArray(parsed)&&parsed.length)staffList=parsed;
       }catch(e){console.warn('スタッフ一覧の読み込みに失敗しました',e);}
     }
+    if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
+    if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
     if(r.key==='last_updated'){
       try{
         const d=new Date(r.value);
@@ -1230,7 +1251,7 @@ function switchTab(prefix,name,el){
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
-  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();}
+  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();}
 }
 
 let todayTherapist='';
@@ -3075,6 +3096,58 @@ function renderSettingsDisplay(){
   document.getElementById('s-display').innerHTML=`受付期間：${settings.start||'指定なし'} 〜 ${settings.end||'指定なし'}<br>受付時間：${(settings.tstart&&settings.tend)?`${settings.tstart} 〜 ${settings.tend}（時間帯制限あり）`:'指定なし（時間帯制限なし）'}`;
 }
 
+// ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
+function renderTopLinks(){
+  const el=document.getElementById('top-external-links');
+  if(!el)return;
+  const igIcon=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block">
+    <rect width="24" height="24" rx="6.5" fill="url(#igTopGradient)"/>
+    <rect x="4.5" y="4.5" width="15" height="15" rx="4" stroke="#fff" stroke-width="1.6"/>
+    <circle cx="12" cy="12" r="3.6" stroke="#fff" stroke-width="1.6"/>
+    <circle cx="16.8" cy="7.2" r="1" fill="#fff"/>
+    <defs>
+      <linearGradient id="igTopGradient" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FEE411"/><stop offset="0.2" stop-color="#FB5936"/>
+        <stop offset="0.5" stop-color="#E31E7E"/><stop offset="0.8" stop-color="#B92FBF"/>
+        <stop offset="1" stop-color="#4238C9"/>
+      </linearGradient>
+    </defs>
+  </svg>`;
+  const links=[];
+  if(externalLinks.homepage)links.push({url:externalLinks.homepage,iconHtml:'<span style="font-size:20px">🏠</span>',label:'ホームページ'});
+  if(externalLinks.instagram)links.push({url:externalLinks.instagram,iconHtml:igIcon,label:'インスタ'});
+  if(!links.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='flex';
+  el.innerHTML=links.map(l=>`
+    <a href="${l.url}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1;flex-direction:column;align-items:center;gap:2px;text-decoration:none;padding:12px 8px">
+      ${l.iconHtml}
+      <span style="font-size:12px">${l.label}</span>
+    </a>`).join('');
+}
+function populateExternalLinkInputs(){
+  const hp=document.getElementById('ext-homepage-url');
+  const ig=document.getElementById('ext-instagram-url');
+  if(hp)hp.value=externalLinks.homepage;
+  if(ig)ig.value=externalLinks.instagram;
+}
+async function saveExternalLinks(){
+  const hp=document.getElementById('ext-homepage-url').value.trim();
+  const ig=document.getElementById('ext-instagram-url').value.trim();
+  externalLinks.homepage=hp;
+  externalLinks.instagram=ig;
+  await Promise.all([
+    dbSaveSetting('link_homepage',hp),
+    dbSaveSetting('link_instagram',ig),
+  ]);
+  await dbLog('admin','save_external_links',`ホームページ：${hp||'未設定'} ／ Instagram：${ig||'未設定'}`);
+  renderTopLinks();
+  const msg=document.getElementById('ext-links-saved');
+  msg.style.display='block';
+  setTimeout(()=>msg.style.display='none',2000);
+  updateLastUpdated();
+  showToast('外部リンクを保存しました','#34C759');
+}
+
 // ---- スタッフ管理（担当PT） ----
 function renderStaffListArea(){
   const el=document.getElementById('staff-list-area');
@@ -3198,6 +3271,7 @@ async function init(){
     document.getElementById('top-clinic-name').textContent=clinicName;
     renderReminder();
     renderSettingsDisplay();
+    renderTopLinks();
   }catch(e){
     console.error('init error',e);
     alert('データの読み込みに失敗しました。\nインターネット接続を確認してページを再読み込みしてください。');
