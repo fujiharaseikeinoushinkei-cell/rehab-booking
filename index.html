@@ -593,6 +593,20 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
 
     <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">臨時営業日</div>
+      <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
+        本来休診の日（日曜・第1/3週の木土など）でも、特定の日付・担当・時間だけ臨時で営業させたい場合に登録します。登録した時間は、週間表・患者予約画面などで通常の枠と同じように予約できるようになります。
+      </p>
+      <div class="input-group"><label>臨時営業日</label><input type="date" id="sp-date"></div>
+      <div class="input-group"><label>担当</label><select id="sp-th"></select></div>
+      <div class="input-group"><label>時間</label><input type="time" id="sp-time" value="9:10"></div>
+      <button class="btn btn-primary btn-block" onclick="addSpecialDay()">追加する</button>
+      <p id="sp-err" style="font-size:13px;color:#FF3B30;margin-top:8px;display:none"></p>
+    </div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:10px">臨時営業日一覧</div>
+    <div id="special-day-list" style="margin-bottom:16px"></div>
+
+    <div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:6px">基本営業時間（曜日・週パターン）</div>
       <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
         曜日ごとに、月の第何週かによって営業状況を設定できます。<br>
@@ -636,6 +650,7 @@ let clinicName="藤原整形外科リハビリ予約";
 let patients={};
 let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
+let bookingUnits={}; // {date:{staffId:{time:1|2}}} 1単位(20分)か2単位(40分/通常)かを記録
 let notifications=[];
 let settings={start:"",end:"",tstart:"",tend:""};
 let externalLinks={homepage:"",instagram:""};
@@ -804,6 +819,8 @@ function isMorningOff(ds,time){
 }
 
 function isTherapistOff(ds,th){
+  // 臨時営業日として個別に開放されている場合は、通常の休診ルールを上書きして営業扱いにする
+  if(hasSpecialBusinessDay(ds,th))return false;
   // 全休の場合のみisLeave（日ごとの判定）
   if(isDayOff(ds))return true;
   const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
@@ -813,6 +830,13 @@ function isTherapistOff(ds,th){
 
 // スロットが予約可能かチェック（診療ルール＋PT休暇）
 function isSlotAvailable(ds,time,th){
+  // 臨時営業日として個別に登録された時間枠は、通常の休診ルールを上書きして予約可能とする
+  // （ただし休診日タブで明示的に登録された休診・PT休暇は優先して適用する）
+  if(th&&isSpecialBusinessSlot(ds,th,time)){
+    if(isHolidayPeriodOff(ds,time))return false;
+    if(isLeaveForSlot(ds,th,time))return false;
+    return true;
+  }
   if(isDayOff(ds))return false;
   if(isAfternoonOff(ds,time))return false;
   if(isMorningOff(ds,time))return false;
@@ -847,12 +871,27 @@ function timeMins(t){
   const [h,m]=(normalizeTime(t)||'0:0').split(':').map(Number);
   return h*60+(m||0);
 }
+// 分単位のオフセットを時間文字列に加算する汎用関数（負の値も可）
+function addMinutesToTime(time,deltaMin){
+  const mins=timeMins(time)+deltaMin;
+  const h=Math.floor(mins/60),m=((mins%60)+60)%60;
+  return `${h}:${String(m).padStart(2,'0')}`;
+}
 // 1単位(20分)登録用：基準の時間枠から20分後の「後半」時間を計算する
 // 例）8:30→8:50、9:10→9:30、14:50→15:10
 function getSecondUnitTime(time){
-  const mins=timeMins(time)+20;
-  const h=Math.floor(mins/60),m=mins%60;
-  return `${h}:${String(m).padStart(2,'0')}`;
+  return addMinutesToTime(time,20);
+}
+// timeが「枠設定」で定義された基準（前半）の時間かどうかに関わらず、
+// 対応する基準（前半）の時間を求める。timeが後半(+20分)の場合はその20分前を返す。
+function getBaseSlotTime(ds,therapist,time){
+  const dow=parseLocalDate(ds).getDay();
+  const defTimes=timesForDate(ds,therapist);
+  const nt=normalizeTime(time);
+  if(defTimes.includes(nt))return nt;
+  const prevTime=addMinutesToTime(nt,-20);
+  if(defTimes.includes(prevTime))return prevTime;
+  return nt;
 }
 function slotDefsForDay(dow,therapist){
   return slotDefs
@@ -862,12 +901,36 @@ function slotDefsForDay(dow,therapist){
     .sort((a,b)=>timeMins(a)-timeMins(b));
 }
 
+// ---- 臨時営業日 ----
+let specialDays=[]; // [{id,special_date,therapist,time_slot}]
+function getSpecialTimesForDay(ds,therapist){
+  return specialDays
+    .filter(s=>s.special_date===ds&&s.therapist===therapist)
+    .map(s=>normalizeTime(s.time_slot))
+    .filter((v,i,a)=>a.indexOf(v)===i);
+}
+function isSpecialBusinessSlot(ds,therapist,time){
+  return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
+}
+function hasSpecialBusinessDay(ds,therapist){
+  return getSpecialTimesForDay(ds,therapist).length>0;
+}
+// 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
+function timesForDate(ds,therapist){
+  const dow=parseLocalDate(ds).getDay();
+  const defined=slotDefsForDay(dow,therapist);
+  const special=getSpecialTimesForDay(ds,therapist);
+  return [...new Set([...defined,...special])].sort((a,b)=>timeMins(a)-timeMins(b));
+}
+
 function ensureBookingShape(ds){
   if(!bookings[ds])bookings[ds]={};
   if(!bookingStatuses[ds])bookingStatuses[ds]={};
+  if(!bookingUnits[ds])bookingUnits[ds]={};
   staffList.forEach(s=>{
     if(!bookings[ds][s.id])bookings[ds][s.id]={};
     if(!bookingStatuses[ds][s.id])bookingStatuses[ds][s.id]={};
+    if(!bookingUnits[ds][s.id])bookingUnits[ds][s.id]={};
   });
 }
 
@@ -934,16 +997,17 @@ async function loadAllData(){
   // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes]=await Promise.all([
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
     sb.from('system_settings').select('*'),
     sb.from('slot_definitions').select('*').eq('is_active',true),
     sb.from('holidays').select('holiday_date,label,period'),
     sb.from('therapist_leaves').select('*'),
     sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
-    sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status')
+    sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
     sb.from('notifications').select('id,message,created_at,operator')
       .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
+    sb.from('special_business_days').select('*'),
   ]);
 
   // settings
@@ -1005,18 +1069,24 @@ async function loadAllData(){
   });
 
   // bookings
-  bookings={};bookingStatuses={};
+  bookings={};bookingStatuses={};bookingUnits={};
   (brRes.data||[]).forEach(b=>{
     if(!bookings[b.booking_date])bookings[b.booking_date]={};
     if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
+    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
 
   // notifications
   notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
+
+  // 臨時営業日
+  specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot)})):[];
 }
 
 function fmtTime(iso){
@@ -1043,9 +1113,9 @@ function getPatientUpcoming(pid){
 }
 
 // ---- DB OPS ----
-async function dbBookSlot(date,therapist,time,pid){
+async function dbBookSlot(date,therapist,time,pid,unit=2){
   const normTime=normalizeTime(time);
-  console.log('予約開始',{booking_date:date,therapist,time_slot:normTime,patient_id:pid});
+  console.log('予約開始',{booking_date:date,therapist,time_slot:normTime,patient_id:pid,unit});
 
   // 既存レコードを「ステータス問わず」取得する
   // （cancelled/done/transferの行も含めて確認する。これらの行は削除せずDBに残っているため、
@@ -1084,12 +1154,12 @@ async function dbBookSlot(date,therapist,time,pid){
     // その行をUPDATEして再利用する（実施済み・振替済みの履歴は保持しない運用のため上書きしてよい）
     console.log('既存行を再利用してUPDATE',{id:existing.id,prev_status:existing.status});
     const r=await sb.from('bookings')
-      .update({patient_id:pid,status:'reserved'})
+      .update({patient_id:pid,status:'reserved',unit})
       .eq('id',existing.id).select();
     inserted=r.data;error=r.error;
   } else {
     // 該当枠のレコードが一つも無い場合のみ新規INSERT
-    const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:'reserved'};
+    const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:'reserved',unit};
     console.log('INSERT実行',insertData);
     const r=await sb.from('bookings').insert(insertData).select();
     inserted=r.data;error=r.error;
@@ -1112,6 +1182,9 @@ async function dbBookSlot(date,therapist,time,pid){
   if(!bookingStatuses[date])bookingStatuses[date]={};
   if(!bookingStatuses[date][therapist])bookingStatuses[date][therapist]={};
   bookingStatuses[date][therapist][normTime]='reserved';
+  if(!bookingUnits[date])bookingUnits[date]={};
+  if(!bookingUnits[date][therapist])bookingUnits[date][therapist]={};
+  bookingUnits[date][therapist][normTime]=unit;
   updateLastUpdated();
   return{ok:true};
 }
@@ -1163,17 +1236,20 @@ async function resolvePatientName(pid){
 async function reloadBookings(){
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
   const {data:br}=await sb.from('bookings')
-    .select('booking_date,time_slot,therapist,patient_id,status')
+    .select('booking_date,time_slot,therapist,patient_id,status,unit')
     .gte('booking_date',from).lte('booking_date',to);
-  bookings={};bookingStatuses={};
+  bookings={};bookingStatuses={};bookingUnits={};
   (br||[]).forEach(b=>{
     if(!bookings[b.booking_date])bookings[b.booking_date]={};
     if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
     bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
+    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
   console.log('bookingsリロード完了',bookings);
 }
@@ -1259,7 +1335,7 @@ function switchTab(prefix,name,el){
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
-  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();}
+  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();}
 }
 
 let todayTherapist='';
@@ -1284,12 +1360,12 @@ function renderTodaySchedule(th){
   todayTherapist=th;
   const ds=dateStr(TODAY);
   const dow=TODAY.getDay();
-  if(isHoliday(ds)||dow===0){
+  if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,th)){
     el.innerHTML='<div class="card" style="text-align:center;color:#B00020;font-size:13px">🔴 本日は休診日です</div>';
     return;
   }
   ensureBookingShape(ds);
-  const times=slotDefsForDay(dow,th).sort((a,b)=>{
+  const times=timesForDate(ds,th).sort((a,b)=>{
     const [ah,am]=a.split(':').map(Number);
     const [bh,bm]=b.split(':').map(Number);
     return (ah*60+am)-(bh*60+bm);
@@ -1368,9 +1444,9 @@ function renderWeekTable(){
   // 全スロット時間を収集（正規化して重複排除）
   const allTimes=new Set();
   days.forEach(d=>{
-    const dow=d.getDay();
+    const ds2=dateStr(d);
     staffList.forEach(s=>{
-      slotDefsForDay(dow,s.id).forEach(t=>allTimes.add(normalizeTime(t)));
+      timesForDate(ds2,s.id).forEach(t=>allTimes.add(normalizeTime(t)));
     });
   });
   const sortedTimes=[...allTimes].sort((a,b)=>timeMins(a)-timeMins(b));
@@ -1392,13 +1468,14 @@ function renderWeekTable(){
   days.forEach(d=>{
     const ds=dateStr(d);
     const dow=d.getDay();
-    const off=isDayOff(ds);
+    const anySpecial=staffList.some(s=>hasSpecialBusinessDay(ds,s.id));
+    const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
     html+=`<th colspan="${THERAPISTS.length}" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W}">
       <div style="font-weight:600">${dayLabel}</div>
       <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
-      ${off?'<div style="font-size:9px;color:#B00020">休診</div>':''}
+      ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
     </th>`;
   });
   html+=`</tr>`;
@@ -1407,8 +1484,8 @@ function renderWeekTable(){
   html+=`<tr><th style="border:1px solid #D1D1D6;background:#F9FAFB;position:sticky;left:0;z-index:2"></th>`;
   days.forEach(d=>{
     const ds=dateStr(d);
-    const off=isDayOff(ds);
     THERAPISTS.forEach((th,ti)=>{
+      const off=isDayOff(ds)&&!hasSpecialBusinessDay(ds,th);
       const lv=isLeave(ds,th);
       const lvFull=lv&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
       const bg=off?'#F3F4F6':lvFull?'#FEF3C7':'#F0F9FF';
@@ -1427,13 +1504,12 @@ function renderWeekTable(){
       const dow=d.getDay();
       const dayOff=isDayOff(ds);
       THERAPISTS.forEach((th)=>{
-        // slotDefに存在するか（正規化して比較）
-        const defTimes=slotDefsForDay(dow,th).map(t=>normalizeTime(t));
+        // slotDefまたは臨時営業日に存在するか（正規化して比較）
+        const defTimes=timesForDate(ds,th);
         const hasDef=defTimes.includes(time);
 
-        // PT休暇・午後休診チェック
-        const slotOff=!isSlotAvailable(ds,time,th);
-        const off=dayOff||slotOff;
+        // PT休暇・午後休診・臨時営業日チェック（isSlotAvailableが臨時営業日の上書きを含めて判定する）
+        const off=!isSlotAvailable(ds,time,th);
 
         if(!hasDef){
           // 枠定義なし
@@ -1447,8 +1523,10 @@ function renderWeekTable(){
           const bottomTime=getSecondUnitTime(time);
           const pid=bookings[ds]?.[th]?.[time];
           const status=bookingStatuses[ds]?.[th]?.[time]||'';
+          const unit=bookingUnits[ds]?.[th]?.[time]||2;
           const bPid=bookings[ds]?.[th]?.[bottomTime];
           const bStatus=bookingStatuses[ds]?.[th]?.[bottomTime]||'';
+          const bUnit=bookingUnits[ds]?.[th]?.[bottomTime]||2;
           const hasTop=pid&&patients[pid];
           const hasBottom=bPid&&patients[bPid];
 
@@ -1468,9 +1546,13 @@ function renderWeekTable(){
           }
 
           if(hasTop||hasBottom){
+            // 「＋追加」は、埋まっている方が1単位（unit===1）登録の場合のみ表示する
+            // （通常の2単位予約が入っている場合は枠全体を使用しているため、追加登録はできない）
+            const topCell=hasTop?unitLine(pid,status,time,false):(hasBottom&&bUnit===1?addLine(time):'');
+            const bottomCell=hasBottom?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&unit===1?addLine(bottomTime):'');
             html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">
-              ${hasTop?unitLine(pid,status,time,false):addLine(time)}
-              ${hasBottom?unitLine(bPid,bStatus,bottomTime,true):(hasTop?addLine(bottomTime):'')}
+              ${topCell}
+              ${bottomCell}
             </td>`;
           } else {
             html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')">
@@ -1489,11 +1571,12 @@ function renderWeekTable(){
 function weekTableBookModal(ds,therapist,time){
   const d=parseLocalDate(ds);
   const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
-  // このtimeが「枠設定」で定義された基準の時間（前半）かどうかを判定
-  // 基準の時間でなければ、既に1単位（後半20分）の枠を直接指定されているとみなす
-  const isBaseSlot=slotDefsForDay(d.getDay(),therapist).map(t=>normalizeTime(t)).includes(normalizeTime(time));
-  const bottomTime=getSecondUnitTime(time);
-  const bottomTaken=!!(bookings[ds]?.[therapist]?.[bottomTime]);
+  // クリックされたtimeから、この枠の基準（前半）の時間を求める
+  const baseTime=getBaseSlotTime(ds,therapist,time);
+  const secondTime=getSecondUnitTime(baseTime);
+  const isBaseSlot=timesForDate(ds,therapist).includes(normalizeTime(time));
+  const baseTaken=!!(bookings[ds]?.[therapist]?.[baseTime]);
+  const secondTaken=!!(bookings[ds]?.[therapist]?.[secondTime]);
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">📅 代理予約</div>
     <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}${!isBaseSlot?'　<span style="font-size:12px;color:#8B4500">（1単位・後半20分）</span>':''}</p>
@@ -1515,9 +1598,10 @@ function weekTableBookModal(ds,therapist,time){
       <select id="wt-auto">
         <option value="">今回のみ（${time}に登録）</option>
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
-        ${(isBaseSlot&&!bottomTaken)?`<option value="half">1単位登録（${bottomTime}に登録・${time}はそのまま空けておく）</option>`:''}
+        ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
+        ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
       </select>
-      ${isBaseSlot?`<p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位登録」を選ぶと、この枠の後半20分（${bottomTime}〜）だけを使う予約として登録され、${time}側はもう1人分の登録に使えます。</p>`:''}
+      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位」は20分のみの予約です。この枠は「${baseTime}」と「${secondTime}」の2つに分けて、それぞれ別の患者を登録できます。</p>
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -1592,8 +1676,12 @@ async function weekTableDoBook(ds,therapist,time){
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
   const auto=document.getElementById('wt-auto').value;
-  // 「1単位登録」を選んだ場合は、実際に登録する時間を後半20分にずらす
-  const actualTime=auto==='half'?getSecondUnitTime(time):time;
+  // 「1単位」を選んだ場合は、実際に登録する時間を選択に応じて前半／後半に切り替える
+  const baseTime=getBaseSlotTime(ds,therapist,time);
+  const secondTime=getSecondUnitTime(baseTime);
+  const isHalf=auto==='half_1'||auto==='half_2';
+  const actualTime=auto==='half_1'?baseTime:auto==='half_2'?secondTime:time;
+  const unit=isHalf?1:2;
   const normTime=normalizeTime(actualTime);
 
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
@@ -1611,12 +1699,12 @@ async function weekTableDoBook(ds,therapist,time){
   }
 
   btn.disabled=true;btn.textContent='処理中...';
-  const r=await dbBookSlot(ds,therapist,normTime,pid);
+  const r=await dbBookSlot(ds,therapist,normTime,pid,unit);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
   const d=parseLocalDate(ds);
-  const unitNote=auto==='half'?'【1単位】':'';
+  const unitNote=isHalf?'【1単位】':'';
   await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
 
   // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
@@ -1813,9 +1901,9 @@ function renderPublicSlots(){
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
     const dow=d.getDay();
-    const times=slotDefsForDay(dow,pubTherapist);
+    const times=timesForDate(ds,pubTherapist);
     if(!times.length)continue;
-    if(isHoliday(ds)||dow===0){
+    if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,pubTherapist)){
       html+=`<div class="card" style="padding:12px;margin-bottom:8px">
         <div style="font-size:14px;font-weight:600;margin-bottom:6px">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</div>
         <div style="font-size:12px;color:#B00020">🔴 休診日</div>
@@ -2013,9 +2101,9 @@ function renderResSlots(){
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
     const dow=d.getDay();
-    const times=slotDefsForDay(dow,resTherapist);
+    const times=timesForDate(ds,resTherapist);
     if(!times.length)continue;
-    if(isHoliday(ds)||dow===0){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
+    if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,resTherapist)){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
     ensureBookingShape(ds);
     const openTimes=times
       .filter(t=>!bookings[ds]?.[resTherapist]?.[normalizeTime(t)] && isSlotAvailable(ds,t,resTherapist))
@@ -2283,7 +2371,8 @@ function renderSchedule(){
   const d=addDays(TODAY,schedOffset);
   const ds=dateStr(d);
   const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
-  const isOff=isDayOff(ds);
+  const anySpecialToday=staffList.some(s=>hasSpecialBusinessDay(ds,s.id));
+  const isOff=isDayOff(ds)&&!anySpecialToday;
   label.textContent=`${m}月${day}日（${wd}）${isOff?'  🔴休診':''}`;
 
   if(isOff){
@@ -2294,7 +2383,7 @@ function renderSchedule(){
   // 全スタッフの時間を統合してソート
   const allTimes=new Set();
   staffList.forEach(s=>{
-    slotDefsForDay(d.getDay(),s.id).forEach(t=>allTimes.add(t));
+    timesForDate(ds,s.id).forEach(t=>allTimes.add(t));
   });
   const sortedTimes=[...allTimes].sort((a,b)=>{
     const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
@@ -2316,7 +2405,7 @@ function renderSchedule(){
     if(lvFull){
       html+='<div style="font-size:12px;color:#8E8E93;text-align:center;padding:8px 0">本日休暇</div>';
     } else {
-      const times=slotDefsForDay(d.getDay(),th).sort((a,b)=>{
+      const times=timesForDate(ds,th).sort((a,b)=>{
         const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
         return(ah*60+am)-(bh*60+bm);
       });
@@ -2360,7 +2449,7 @@ function loadStatusSlots(){
   let html='';
   staffList.forEach(s=>{
     const th=s.id;
-    const times=slotDefsForDay(d.getDay(),th);
+    const times=timesForDate(ds,th);
     if(!times.length)return;
     html+=`<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px">${getStaffName(th)}</div>`;
     times.forEach(t=>{
@@ -2823,8 +2912,8 @@ function renderBkSlots(){
     const d=addDays(ws,i);const ds=dateStr(d);
     if(d<TODAY)continue;
     const dow=d.getDay();
-    if(isTherapistOff(ds,p.therapist)||dow===0)continue;
-    const times=slotDefsForDay(dow,p.therapist).sort((a,b)=>{
+    if(isTherapistOff(ds,p.therapist))continue;
+    const times=timesForDate(ds,p.therapist).sort((a,b)=>{
       const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
       return(ah*60+am)-(bh*60+bm);
     });
@@ -3131,6 +3220,58 @@ function renderSettingsDisplay(){
 }
 
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
+// ---- 臨時営業日設定 ----
+function renderSpecialDaysList(){
+  const el=document.getElementById('special-day-list');
+  if(!el)return;
+  if(!specialDays.length){el.innerHTML='<div class="empty">臨時営業日の登録はありません</div>';return;}
+  const sorted=[...specialDays].sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
+  el.innerHTML=sorted.map(s=>{
+    const d=parseLocalDate(s.special_date);
+    const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    return `<div class="card" style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
+        <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button>
+    </div>`;
+  }).join('');
+}
+async function addSpecialDay(){
+  const ds=document.getElementById('sp-date').value;
+  const th=document.getElementById('sp-th').value;
+  const timeVal=document.getElementById('sp-time').value;
+  const err=document.getElementById('sp-err');
+  err.style.display='none';
+  if(!ds){err.textContent='日付を選択してください';err.style.display='block';return;}
+  if(!timeVal){err.textContent='時間を入力してください';err.style.display='block';return;}
+  const fmtTime=timeVal.split(':').map((v,i)=>i===0?parseInt(v):v).join(':');
+  const normTime=normalizeTime(fmtTime);
+  if(specialDays.some(s=>s.special_date===ds&&s.therapist===th&&normalizeTime(s.time_slot)===normTime)){
+    err.textContent='この臨時営業日・時間は既に登録されています';err.style.display='block';return;
+  }
+  const {data,error}=await sb.from('special_business_days').insert({special_date:ds,therapist:th,time_slot:fmtTime}).select().single();
+  if(error){
+    console.error('臨時営業日の追加に失敗',error);
+    err.textContent=`追加に失敗しました（${error.message||error.code||'不明'}）`;err.style.display='block';return;
+  }
+  specialDays.push({...data,time_slot:normalizeTime(data.time_slot)});
+  renderSpecialDaysList();updateLastUpdated();
+  await dbLog('admin','add_special_day',`${ds} ${fmtTime} ${getStaffName(th)}`);
+  showToast('臨時営業日を追加しました','#34C759');
+  renderWeekTable();
+}
+async function deleteSpecialDay(id){
+  if(!confirm('この臨時営業日の設定を削除しますか？'))return;
+  const {error}=await sb.from('special_business_days').delete().eq('id',id);
+  if(error){showToast('削除に失敗しました');return;}
+  specialDays=specialDays.filter(s=>s.id!==id);
+  renderSpecialDaysList();updateLastUpdated();
+  showToast('臨時営業日を削除しました');
+  renderWeekTable();
+}
+
 function renderTopLinks(){
   const el=document.getElementById('top-external-links');
   if(!el)return;
