@@ -847,6 +847,13 @@ function timeMins(t){
   const [h,m]=(normalizeTime(t)||'0:0').split(':').map(Number);
   return h*60+(m||0);
 }
+// 1単位(20分)登録用：基準の時間枠から20分後の「後半」時間を計算する
+// 例）8:30→8:50、9:10→9:30、14:50→15:10
+function getSecondUnitTime(time){
+  const mins=timeMins(time)+20;
+  const h=Math.floor(mins/60),m=mins%60;
+  return `${h}:${String(m).padStart(2,'0')}`;
+}
 function slotDefsForDay(dow,therapist){
   return slotDefs
     .filter(s=>s.day_of_week===dow&&s.therapist===therapist&&s.is_active)
@@ -1004,7 +1011,7 @@ async function loadAllData(){
     if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
-    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow')?b.patient_id:null;
+    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
   });
 
@@ -1053,11 +1060,11 @@ async function dbBookSlot(date,therapist,time,pid){
   const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
   console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
 
-  // すでに「予約済み（reserved）」または「来なかった（noshow）」の行があれば拒否
-  if(existing && (existing.status==='reserved'||existing.status==='noshow')){
+  // すでに「予約済み（reserved）」「実施済み（done）」「来なかった（noshow）」の行があれば拒否
+  if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
     const existName=existing.patient_id&&patients[existing.patient_id]
       ?patients[existing.patient_id].name:'別の患者';
-    const reasonLabel=existing.status==='noshow'?'（来なかった扱い）':'';
+    const reasonLabel=existing.status==='noshow'?'（来なかった扱い）':existing.status==='done'?'（実施済み）':'';
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さん${reasonLabel}が使用中です。別の時間をお選びください。`};
   }
 
@@ -1132,8 +1139,9 @@ async function dbUpdateStatus(date,therapist,time,status){
     .select();
   if(error){console.error(error);return {ok:false,patientId:null};}
   const patientId=(data&&data[0]&&data[0].patient_id)?data[0].patient_id:null;
-  if(status!=='reserved'&&status!=='noshow'&&bookings[date]?.[therapist])bookings[date][therapist][normTime]=null;
-  if(status==='noshow'&&patientId&&bookings[date]?.[therapist])bookings[date][therapist][normTime]=patientId;
+  const keepPidStatuses=['reserved','noshow','done'];
+  if(!keepPidStatuses.includes(status)&&bookings[date]?.[therapist])bookings[date][therapist][normTime]=null;
+  if(keepPidStatuses.includes(status)&&status!=='reserved'&&patientId&&bookings[date]?.[therapist])bookings[date][therapist][normTime]=patientId;
   if(bookingStatuses[date]?.[therapist])bookingStatuses[date][therapist][normTime]=status;
   await reloadBookings();
   updateLastUpdated();
@@ -1164,7 +1172,7 @@ async function reloadBookings(){
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
-    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow')?b.patient_id:null;
+    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
   });
   console.log('bookingsリロード完了',bookings);
@@ -1435,18 +1443,34 @@ function renderWeekTable(){
           const lvFull=isLeave(ds,th)&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
           html+=`<td style="border:1px solid #E5E7EB;background:#F3F4F6;padding:4px;text-align:center;min-width:${CELL_W};font-size:9px;color:#9CA3AF">${lvFull?'休暇':dayOff?'休診':'休'}</td>`;
         } else {
-          // 正規化したtimeでbookingsを参照
+          // 正規化したtimeでbookingsを参照（上段＝通常の枠、下段＝1単位登録した後半20分）
+          const bottomTime=getSecondUnitTime(time);
           const pid=bookings[ds]?.[th]?.[time];
           const status=bookingStatuses[ds]?.[th]?.[time]||'';
-          if(pid&&patients[pid]){
-            const name=patients[pid].name;
-            const tentative=isTentativePatient(pid);
-            const stColor=status==='done'?'#D1FAE5':status==='cancelled'?'#FEE2E2':status==='transfer'?'#FEF3C7':status==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'#fff');
-            const stLabel=status==='done'?'✓':status==='cancelled'?'✕':status==='transfer'?'振':status==='noshow'?'不在':'';
-            const nameStyle=status==='noshow'?`color:#B00020;`:(tentative&&status!=='done'&&status!=='cancelled'&&status!=='transfer')?`color:${TENTATIVE_FG};`:'';
-            html+=`<td style="border:1px solid #D1D1D6;background:${stColor};padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableStatusModal('${ds}','${th}','${time}')">
-              <div style="font-size:11px;font-weight:600;line-height:1.3;${nameStyle}">${name}</div>
-              ${stLabel?`<div style="font-size:9px;color:#6B7280">${stLabel}</div>`:''}
+          const bPid=bookings[ds]?.[th]?.[bottomTime];
+          const bStatus=bookingStatuses[ds]?.[th]?.[bottomTime]||'';
+          const hasTop=pid&&patients[pid];
+          const hasBottom=bPid&&patients[bPid];
+
+          function unitLine(uPid,uStatus,uTime,small){
+            const name=patients[uPid].name;
+            const tentative=isTentativePatient(uPid);
+            const bg=uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
+            const lbl=uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
+            const nameStyle=uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer')?`color:${TENTATIVE_FG};`:'';
+            return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${uTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
+              <div style="font-size:${small?'9px':'11px'};font-weight:600;line-height:1.25;${nameStyle}">${name}</div>
+              ${lbl?`<div style="font-size:8px;color:#6B7280">${lbl}</div>`:''}
+            </div>`;
+          }
+          function addLine(addTime){
+            return `<div onclick="event.stopPropagation();weekTableBookModal('${ds}','${th}','${addTime}')" style="cursor:pointer;margin-top:2px;padding:1px 0;color:#93C5FD;font-size:9px">＋追加</div>`;
+          }
+
+          if(hasTop||hasBottom){
+            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">
+              ${hasTop?unitLine(pid,status,time,false):addLine(time)}
+              ${hasBottom?unitLine(bPid,bStatus,bottomTime,true):(hasTop?addLine(bottomTime):'')}
             </td>`;
           } else {
             html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')">
@@ -1465,9 +1489,14 @@ function renderWeekTable(){
 function weekTableBookModal(ds,therapist,time){
   const d=parseLocalDate(ds);
   const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  // このtimeが「枠設定」で定義された基準の時間（前半）かどうかを判定
+  // 基準の時間でなければ、既に1単位（後半20分）の枠を直接指定されているとみなす
+  const isBaseSlot=slotDefsForDay(d.getDay(),therapist).map(t=>normalizeTime(t)).includes(normalizeTime(time));
+  const bottomTime=getSecondUnitTime(time);
+  const bottomTaken=!!(bookings[ds]?.[therapist]?.[bottomTime]);
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">📅 代理予約</div>
-    <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
+    <p style="font-size:14px;font-weight:500;margin-bottom:4px">${m}月${day}日（${wd}） ${time}${!isBaseSlot?'　<span style="font-size:12px;color:#8B4500">（1単位・後半20分）</span>':''}</p>
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">担当：${getStaffName(therapist)}</p>
     <div class="input-group">
       <label>患者を検索（ID・カタカナ・名前）</label>
@@ -1482,11 +1511,13 @@ function weekTableBookModal(ds,therapist,time){
     <div id="wt-search-results" style="max-height:200px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;display:none;margin-bottom:12px"></div>
     <div id="wt-selected-patient" style="display:none;background:#E8F4FF;border:1px solid #B3D4FF;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px"></div>
     <div class="input-group" style="margin-top:4px">
-      <label>🔁 同月分の同じ曜日・時間を自動登録</label>
+      <label>🔁 登録方法</label>
       <select id="wt-auto">
-        <option value="">今回のみ</option>
-        <option value="monthly">同月分すべて自動登録</option>
+        <option value="">今回のみ（${time}に登録）</option>
+        ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
+        ${(isBaseSlot&&!bottomTaken)?`<option value="half">1単位登録（${bottomTime}に登録・${time}はそのまま空けておく）</option>`:''}
       </select>
+      ${isBaseSlot?`<p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位登録」を選ぶと、この枠の後半20分（${bottomTime}〜）だけを使う予約として登録され、${time}側はもう1人分の登録に使えます。</p>`:''}
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -1560,7 +1591,10 @@ function wtSelectPatient(pid){
 async function weekTableDoBook(ds,therapist,time){
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
-  const normTime=normalizeTime(time);
+  const auto=document.getElementById('wt-auto').value;
+  // 「1単位登録」を選んだ場合は、実際に登録する時間を後半20分にずらす
+  const actualTime=auto==='half'?getSecondUnitTime(time):time;
+  const normTime=normalizeTime(actualTime);
 
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
   const pid=wtSelectedPid;
@@ -1582,10 +1616,10 @@ async function weekTableDoBook(ds,therapist,time){
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
   const d=parseLocalDate(ds);
-  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
+  const unitNote=auto==='half'?'【1単位】':'';
+  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
 
-  // 同月自動登録
-  const auto=document.getElementById('wt-auto').value;
+  // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
   let autoCount=0;
   if(auto==='monthly'){
     const baseDate=parseLocalDate(ds);
@@ -2334,7 +2368,7 @@ function loadStatusSlots(){
       const pid=bookings[ds]?.[th]?.[nt];
       const status=bookingStatuses[ds]?.[th]?.[nt]||'reserved';
       const name=pid?(patients[pid]?.name||'不明'):'（空き）';
-      const rowStyle=status==='noshow'?'background:#FFE0E0;border-radius:8px;padding:0 6px;':'';
+      const rowStyle=status==='noshow'?'background:#FFE0E0;border-radius:8px;padding:0 6px;':status==='done'?'background:#D1FAE5;border-radius:8px;padding:0 6px;':'';
       html+=`<div class="sched-row" style="${rowStyle}">
         <span class="sched-time">${t}</span>
         <span class="sched-name">${name}</span>
