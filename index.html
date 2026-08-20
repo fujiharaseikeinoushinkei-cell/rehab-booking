@@ -144,7 +144,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="nav">
     <div>
       <div class="nav-title" id="top-clinic-name">藤原整形外科リハビリ予約</div>
-      <div class="nav-sub">
+      <div class="nav-sub" id="top-nav-sub">
         ⚠️ 当日キャンセルは <strong>電話</strong> をお願いします。
         <a href="tel:055-254-0511" style="color:#007AFF;text-decoration:none;font-weight:600">TEL.055-254-0511</a>
       </div>
@@ -531,7 +531,9 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="pad pt-12" id="atab-settings" style="display:none">
     <div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:14px">クリニック名・システム名</div>
-      <div class="input-group"><label>表示名</label><input type="text" id="cn-name"></div>
+      <div class="input-group"><label>表示名</label><input type="text" id="cn-name" placeholder="クリニック、施設名、サービス名"></div>
+      <div class="input-group"><label>トップページの注意文（サブタイトル）</label><input type="text" id="cn-subtitle" placeholder="例：当日キャンセルは電話をお願いします。"></div>
+      <div class="input-group"><label>電話番号</label><input type="tel" id="cn-phone" placeholder="例：055-254-0511" autocomplete="off"></div>
       <button class="btn btn-primary btn-block" onclick="saveClinicName()">変更する</button>
       <p id="cn-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 変更しました</p>
     </div>
@@ -647,6 +649,8 @@ const TOMORROW=new Date(TODAY); TOMORROW.setDate(TOMORROW.getDate()+1);
 
 let ADMIN_PW="rehab2025";
 let clinicName="藤原整形外科リハビリ予約";
+let topSubtitleText="当日キャンセルは電話をお願いします。";
+let clinicPhone="055-254-0511";
 let patients={};
 let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
@@ -986,9 +990,10 @@ function receptionClosedNoticeHTML(){
   } else if(settings.tstart && settings.tend){
     msg=`本日の予約受付時間は${settings.tstart}〜${settings.tend}です。時間内に改めてお試しください。`;
   }
+  const telHref=clinicPhone?clinicPhone.replace(/[^0-9+]/g,''):'';
   return `<div class="notice" style="text-align:center;line-height:1.9">
     ⚠️ ${msg}<br>不明点がある場合は直接お電話ください。<br>
-    <a href="tel:055-254-0511" style="color:#007AFF;font-weight:600;text-decoration:none">TEL.055-254-0511</a>
+    ${clinicPhone?`<a href="tel:${telHref}" style="color:#007AFF;font-weight:600;text-decoration:none">TEL.${clinicPhone}</a>`:''}
   </div>`;
 }
 
@@ -1013,6 +1018,8 @@ async function loadAllData(){
   // settings
   (srRes.data||[]).forEach(r=>{
     if(r.key==='clinic_name')clinicName=r.value;
+    if(r.key==='top_subtitle_text')topSubtitleText=r.value;
+    if(r.key==='clinic_phone')clinicPhone=r.value;
     if(r.key==='admin_password')ADMIN_PW=r.value;
     if(r.key==='reception_start')settings.start=r.value;
     if(r.key==='reception_end')settings.end=r.value;
@@ -1335,7 +1342,7 @@ function switchTab(prefix,name,el){
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
-  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();}
+  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();}
 }
 
 let todayTherapist='';
@@ -1435,11 +1442,18 @@ function renderWeekTable(){
   if(!el)return;
   const ws=monday(addDays(TODAY,weekTableOffset*7));
   const days=[];
+  // 日曜日は通常表示しないが、臨時営業日が登録されている場合のみ列を追加する
+  const sunday=addDays(ws,-1);
+  const sundayStr=dateStr(sunday);
+  const sundayHasSpecial=staffList.some(s=>hasSpecialBusinessDay(sundayStr,s.id));
+  if(sundayHasSpecial)days.push(sunday);
   for(let i=0;i<6;i++){const d=addDays(ws,i);days.push(d);}
 
   const we=days[days.length-1];
+  const weekStart=days[0];
+  const startLabel=sundayHasSpecial?`${weekStart.getMonth()+1}月${weekStart.getDate()}日（日）`:`${ws.getMonth()+1}月${ws.getDate()}日（月）`;
   document.getElementById('weektable-label').textContent=
-    `${ws.getMonth()+1}月${ws.getDate()}日（月）〜${we.getMonth()+1}月${we.getDate()}日（土）`;
+    `${startLabel}〜${we.getMonth()+1}月${we.getDate()}日（土）`;
 
   // 全スロット時間を収集（正規化して重複排除）
   const allTimes=new Set();
@@ -2244,7 +2258,7 @@ function adminLogin(){
     renderTodayTherapistButtons();
     renderTodaySchedule(todayTherapist||staffList[0]?.id);
     weekTableOffset=0;
-    document.getElementById('cn-name').value=clinicName;
+    populateClinicSettingsInputs();
     document.getElementById('s-start').value=settings.start;
     document.getElementById('s-end').value=settings.end;
     document.getElementById('s-tstart').value=settings.tstart;
@@ -3179,11 +3193,33 @@ async function doPrevMonthReflect(prevYM,targetYM){
 // ---- SETTINGS ----
 async function saveClinicName(){
   clinicName=document.getElementById('cn-name').value.trim()||clinicName;
-  await dbSaveSetting('clinic_name',clinicName);
+  topSubtitleText=document.getElementById('cn-subtitle').value.trim();
+  clinicPhone=document.getElementById('cn-phone').value.trim();
+  await Promise.all([
+    dbSaveSetting('clinic_name',clinicName),
+    dbSaveSetting('top_subtitle_text',topSubtitleText),
+    dbSaveSetting('clinic_phone',clinicPhone),
+  ]);
   document.getElementById('top-clinic-name').textContent=clinicName;
+  renderTopSubtitle();
   const msg=document.getElementById('cn-saved');msg.style.display='block';
   setTimeout(()=>msg.style.display='none',2000);
   updateLastUpdated();
+}
+// トップページのサブタイトル（注意文＋電話番号）を描画する
+function renderTopSubtitle(){
+  const el=document.getElementById('top-nav-sub');
+  if(!el)return;
+  const telHref=clinicPhone?clinicPhone.replace(/[^0-9+]/g,''):'';
+  el.innerHTML=`⚠️ ${topSubtitleText||'当日キャンセルは電話をお願いします。'}${clinicPhone?`<br><a href="tel:${telHref}" style="color:#007AFF;text-decoration:none;font-weight:600">TEL.${clinicPhone}</a>`:''}`;
+}
+function populateClinicSettingsInputs(){
+  const nameEl=document.getElementById('cn-name');
+  const subEl=document.getElementById('cn-subtitle');
+  const phoneEl=document.getElementById('cn-phone');
+  if(nameEl)nameEl.value=clinicName;
+  if(subEl)subEl.value=topSubtitleText;
+  if(phoneEl)phoneEl.value=clinicPhone;
 }
 async function changePassword(){
   const old=document.getElementById('pw-old').value;
@@ -3444,6 +3480,7 @@ async function init(){
     await loadAllData();
     await ensureTentativePatients();
     document.getElementById('top-clinic-name').textContent=clinicName;
+    renderTopSubtitle();
     renderReminder();
     renderSettingsDisplay();
     renderTopLinks();
