@@ -1579,41 +1579,37 @@ function renderWeekTable(){
     });
     html+=`</tr>`;
   });
-  html+=`</tbody></table>`;
-  el.innerHTML=html;
-
-  // ---- 担当ごとの「実施済」「不在」単位集計 ----
-  const unitTotals={};
-  staffList.forEach(s=>{unitTotals[s.id]={done:0,noshow:0};});
+  // ---- 担当ごとの「実施済」「不在」単位集計（日ごと・列ごと） ----
+  html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">単位</td>`;
   days.forEach(d=>{
     const ds=dateStr(d);
-    staffList.forEach(s=>{
-      const th=s.id;
+    THERAPISTS.forEach((th)=>{
+      let doneUnits=0;
       Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{
-        const unit=bookingUnits[ds]?.[th]?.[t]||2;
-        if(status==='done')unitTotals[th].done+=unit;
-        else if(status==='noshow')unitTotals[th].noshow+=unit;
+        if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);
       });
+      html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
-  const sumEl=document.getElementById('weektable-summary');
-  if(sumEl){
-    let sumHtml=`<table style="border-collapse:collapse;font-size:11px;min-width:260px;margin-top:2px">
-      <thead><tr>
-        <th style="border:1px solid #D1D1D6;padding:5px 8px;background:#F9FAFB;text-align:left">担当</th>
-        <th style="border:1px solid #D1D1D6;padding:5px 8px;background:#D1FAE5;text-align:center">実施済（単位）</th>
-        <th style="border:1px solid #D1D1D6;padding:5px 8px;background:#FFE0E0;text-align:center">不在（単位）</th>
-      </tr></thead><tbody>`;
-    staffList.forEach(s=>{
-      sumHtml+=`<tr>
-        <td style="border:1px solid #D1D1D6;padding:5px 8px;font-weight:600">${s.name}</td>
-        <td style="border:1px solid #D1D1D6;padding:5px 8px;text-align:center;font-weight:700;color:#1A7F47">${unitTotals[s.id].done}</td>
-        <td style="border:1px solid #D1D1D6;padding:5px 8px;text-align:center;font-weight:700;color:#B00020">${unitTotals[s.id].noshow}</td>
-      </tr>`;
+  html+=`</tr>`;
+
+  html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">不在</td>`;
+  days.forEach(d=>{
+    const ds=dateStr(d);
+    THERAPISTS.forEach((th)=>{
+      let noshowUnits=0;
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{
+        if(status==='noshow')noshowUnits+=(bookingUnits[ds]?.[th]?.[t]||2);
+      });
+      html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#B00020;background:#FEF2F2">${noshowUnits||''}</td>`;
     });
-    sumHtml+='</tbody></table>';
-    sumEl.innerHTML=sumHtml;
-  }
+  });
+  html+=`</tr>`;
+
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+  const sumEl=document.getElementById('weektable-summary');
+  if(sumEl)sumEl.innerHTML='';
 }
 
 function weekTableBookModal(ds,therapist,time){
@@ -3074,7 +3070,6 @@ function exportCSV(){
 function printWeekTable(){
   const label=document.getElementById('weektable-label').textContent;
   const tableHTML=document.getElementById('weektable-body').innerHTML;
-  const summaryHTML=document.getElementById('weektable-summary')?.innerHTML||'';
   const printWin=window.open('','_blank','width=900,height=700');
   printWin.document.write(`<!DOCTYPE html>
 <html lang="ja"><head><meta charset="UTF-8">
@@ -3097,8 +3092,6 @@ function printWeekTable(){
 <h2>📋 週間スケジュール表　${label}</h2>
 <p style="font-size:10px;color:#666;margin-bottom:8px">出力日時：${new Date().toLocaleString('ja-JP')}</p>
 ${tableHTML}
-<h3>担当ごとの実施済・不在（単位）</h3>
-${summaryHTML}
 <script>window.onload=function(){window.print();}<\/script>
 </body></html>`);
   printWin.document.close();
