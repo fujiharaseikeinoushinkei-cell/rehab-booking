@@ -8,7 +8,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Hiragino Sans',sans-serif;background:#F5F5F7;color:#1C1C1E;font-size:16px;line-height:1.5}
-.app{max-width:430px;margin:0 auto;min-height:100svh;background:#F5F5F7;position:relative}
+.app{max-width:1200px;margin:0 auto;min-height:100svh;background:#F5F5F7;position:relative}.screen:not(#s-admin){max-width:430px;margin:0 auto}
 .screen{display:none;min-height:100svh;padding-bottom:60px}
 .screen.active{display:block}
 .nav{background:#fff;border-bottom:1px solid #E5E5EA;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
@@ -79,7 +79,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .cal-cell.selected{outline:2px solid #007AFF}
 .sched-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #F2F2F7;min-height:44px}
 .sched-time{font-size:12px;color:#8E8E93;min-width:38px}
-.sched-name{flex:1;font-size:13px}
+.sched-name{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .chip{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
 .chip-tanaka{background:#E0F0FF;color:#004494}
 .chip-fukasawa{background:#EDE8FF;color:#5E35B1}
@@ -128,6 +128,34 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .tab2{padding:10px 4px;font-size:12px;cursor:pointer;color:#8E8E93;text-align:center;font-weight:500;min-height:40px;display:flex;align-items:center;justify-content:center;border-right:1px solid #E5E5EA;background:#fff}
 .tab2:last-child{border-right:none}
 .tab2.active{color:#007AFF;font-weight:600;background:#EFF6FF}
+
+/* ===== 実績表 ===== */
+.actuals-screen{background:#F5F5F7}
+.actuals-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:1px solid #E5E5EA}
+.actuals-toolbar .actuals-title{font-size:15px;font-weight:700;flex:1;min-width:150px}
+.actuals-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:10px 12px 18px}
+.actuals-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px;background:#fff}
+.actuals-table th,.actuals-table td{border:1px solid #B8BCC4;padding:5px 7px;text-align:right;white-space:nowrap;height:26px}
+.actuals-table th{background:#F2F4F7;font-weight:600;text-align:center}
+.actuals-table .actuals-label{text-align:left;min-width:210px;position:sticky;left:0;z-index:2;background:#fff}
+.actuals-table th.actuals-label{background:#E9EDF2;z-index:3}
+.actuals-table .section td{background:#DDE3EA;font-weight:700;text-align:left}
+.actuals-table .total td{font-weight:700;background:#FFF9E6}
+.actuals-table .average{background:#FFF2CC}
+.actuals-table .zero{color:#9A9DA3}
+.actuals-note{font-size:11px;color:#6B7280;line-height:1.6;padding:0 16px 14px}
+.actuals-loading{padding:40px;text-align:center;color:#8E8E93}
+.actuals-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 16px}
+.actuals-kpi .metric{border:1px solid #E5E5EA}
+.actuals-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+@media(max-width:700px){.actuals-kpi{grid-template-columns:repeat(2,1fr)}.actuals-toolbar{position:sticky;top:0;z-index:20}}
+@media print{
+  body{background:#fff!important}.app{max-width:none!important}
+  #s-admin .nav,#s-admin>div:first-of-type,#atab-actuals .actuals-toolbar,#actuals-kpi,.actuals-note{display:none!important}
+  #atab-actuals{display:block!important}.actuals-table-wrap{overflow:visible!important;padding:0!important}
+  .actuals-table{font-size:9px!important}.actuals-table th,.actuals-table td{padding:3px 4px!important}
+  .actuals-table .actuals-label{position:static!important}.card{box-shadow:none!important}
+}
 </style>
 </head>
 <body>
@@ -297,6 +325,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
       <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
       <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid #E5E5EA">
+      <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
+      <div></div><div></div><div></div><div></div>
     </div>
   </div>
 
@@ -621,6 +653,28 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       </div>
       <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="saveBusinessHours()">この内容で保存する</button>
       <p id="bh-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました。各画面に反映されます</p>
+    </div>
+  </div>
+
+  <!-- 実績表 -->
+  <div id="atab-actuals" class="actuals-screen" style="display:none">
+    <div class="actuals-toolbar">
+      <button class="btn btn-sm" onclick="switchTab('a','notify',document.querySelector('#s-admin .tab2'))">← 管理画面</button>
+      <div class="actuals-title">📊 リハビリ実績表</div>
+      <div class="actuals-actions">
+        <label style="font-size:12px;color:#8E8E93">年度</label>
+        <select id="actuals-fy" style="width:130px;min-height:36px;padding:7px 30px 7px 10px" onchange="renderActuals()"></select>
+        <button class="btn btn-sm btn-green" onclick="renderActuals()">↻ 再集計</button>
+        <button class="btn btn-sm btn-orange" onclick="printActuals()">🖨 印刷</button>
+      </div>
+    </div>
+    <div class="actuals-kpi" id="actuals-kpi"></div>
+    <div id="actuals-body"><div class="actuals-loading">年度を選択してください</div></div>
+    <div class="actuals-note">
+      ※「実際取得単位数」は予約ステータスが「実施済」の単位数を集計します。<br>
+      ※「予定取得単位数」は「予約・実施済・来なかった」を集計し、キャンセルは別集計します。<br>
+      ※現在の予約システムには脳血管リハ・医療のみ・実施計画書・医1/医2の区分データがないため、それらは自動算定せず「—」表示にしています。<br>
+      ※診療報酬の金額は請求データそのものではないため自動推定せず、単価を設定した場合のみ表示します。
     </div>
   </div>
 </div><!-- end s-admin -->
@@ -998,6 +1052,13 @@ function receptionClosedNoticeHTML(){
   </div>`;
 }
 
+// ---- 患者アーカイブ（実施済履歴を保持したまま患者管理から非表示にする） ----
+let archivedPatientIds = new Set();
+function isArchivedPatient(id){ return archivedPatientIds.has(String(id)); }
+async function saveArchivedPatientIds(){
+  await dbSaveSetting('archived_patient_ids', JSON.stringify([...archivedPatientIds]));
+}
+
 // ---- LOAD ----
 async function loadAllData(){
   // 並列でまとめて取得（速度改善）
@@ -1041,6 +1102,12 @@ async function loadAllData(){
     }
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
+    if(r.key==='archived_patient_ids'){
+      try{
+        const parsed=JSON.parse(r.value||'[]');
+        archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
+      }catch(e){ archivedPatientIds=new Set(); }
+    }
     if(r.key==='last_updated'){
       try{
         const d=new Date(r.value);
@@ -1297,10 +1364,16 @@ async function dbUpdatePatient(id,p){
 }
 
 async function dbDeletePatient(id){
-  await sb.from('bookings').delete().eq('patient_id',id);
-  await sb.from('visit_history').delete().eq('patient_id',id);
-  const {error}=await sb.from('patients').delete().eq('id',id);
-  return !error;
+  // 「実施済」は実績・履歴として残す。その他の予約だけ削除する。
+  const {error:bookErr}=await sb.from('bookings').delete()
+    .eq('patient_id',id).neq('status','done');
+  if(bookErr){console.error('患者削除時の予約削除失敗',bookErr);return false;}
+
+  // 患者レコード自体は削除せず、アーカイブ扱いにする。
+  // これにより、実施済 booking の patient_id → 患者名を保持できる。
+  archivedPatientIds.add(String(id));
+  await saveArchivedPatientIds();
+  return true;
 }
 
 // ---- SCREEN ----
@@ -1320,7 +1393,7 @@ function showScreen(id){
 }
 function switchTab(prefix,name,el){
   const all=prefix==='p'?['mybook','reserve','history']:
-    ['notify','weektable','calendar','schedule','status','patients','booking','slots','holidays','leaves','logs','deadline','settings'];
+    ['notify','weektable','calendar','schedule','status','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
   // tab と tab2 両方のactiveを解除
@@ -1344,6 +1417,7 @@ function switchTab(prefix,name,el){
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
   if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();}
+  if(name==='actuals'){renderActuals();}
 }
 
 let todayTherapist='';
@@ -1552,7 +1626,7 @@ function renderWeekTable(){
             const lbl=uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
             const nameStyle=uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer')?`color:${TENTATIVE_FG};`:'';
             return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${uTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
-              <div style="font-size:${small?'9px':'11px'};font-weight:600;line-height:1.25;${nameStyle}">${name}</div>
+              <div title="${name}" style="font-size:${small?'8px':'10px'};font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;${nameStyle}">${name}</div>
               ${lbl?`<div style="font-size:8px;color:#6B7280">${lbl}</div>`:''}
             </div>`;
           }
@@ -1665,7 +1739,7 @@ function wtSearchPatient(query){
   if(!q){resultsEl.style.display='none';return;}
 
   // ID・カタカナ・漢字名で検索
-  const matched = Object.entries(patients).filter(([id,p])=>{
+  const matched = Object.entries(patients).filter(([id,p])=>!isArchivedPatient(id)).filter(([id,p])=>{
     const kana = p.kana||'';
     const name = p.name||'';
     return id.includes(q.toLowerCase()) ||
@@ -2679,7 +2753,7 @@ async function renderLogs(){
 // ---- DEADLINE ----
 function renderDeadline(){
   const tb=document.getElementById('dl-tb');
-  const rows=Object.keys(patients).filter(id=>!isTentativePatient(id)).map(id=>{const p=patients[id];const diff=Math.round((p.deadline-TODAY)/864e5);return{id,p,diff};}).sort((a,b)=>a.diff-b.diff);
+  const rows=Object.keys(patients).filter(id=>!isTentativePatient(id)&&!isArchivedPatient(id)).map(id=>{const p=patients[id];const diff=Math.round((p.deadline-TODAY)/864e5);return{id,p,diff};}).sort((a,b)=>a.diff-b.diff);
   let html='';
   rows.forEach(({id,p,diff})=>{
     let rc='',badge='';
@@ -2696,7 +2770,7 @@ function renderDeadline(){
 // ---- PATIENT MANAGEMENT ----
 function renderPatientList(){
   const el=document.getElementById('patient-list');
-  if(!Object.keys(patients).length){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
+  if(!Object.keys(patients).some(id=>!isArchivedPatient(id))){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
 
   // 担当者ごとに分けてあいうえお順でソート
   const sortByKana=(a,b)=>{
@@ -2722,7 +2796,7 @@ function renderPatientList(){
   let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">`;
 
   staffList.forEach(s=>{
-    const ids=Object.keys(patients).filter(id=>patients[id].therapist===s.id).sort(sortByKana);
+    const ids=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&patients[id].therapist===s.id).sort(sortByKana);
     const c=getStaffColor(s.id);
     html+=`<div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;background:${c.bg};border-radius:8px">
@@ -2832,10 +2906,19 @@ async function deletePatient(id){
   if(!confirm(`${p.name}（${id}）を削除しますか？\nこの操作は取り消せません。`))return;
   const ok=await dbDeletePatient(id);
   if(!ok){showToast('削除に失敗しました');return;}
-  await dbLog('admin','delete_patient',`${p.name}（${id}）を削除`);
-  delete patients[id];
-  Object.keys(bookings).forEach(date=>{staffList.forEach(s=>{const th=s.id;Object.keys(bookings[date][th]||{}).forEach(t=>{if(bookings[date][th][t]===id)bookings[date][th][t]=null;});});});
-  renderPatientList();renderDeadline();updateLastUpdated();
+  await dbLog('admin','delete_patient',`${p.name}（${id}）をアーカイブ。実施済履歴は保持`);
+  // patients と実施済 bookings は残す。管理画面からのみ非表示にする。
+  Object.keys(bookings).forEach(date=>{
+    staffList.forEach(s=>{
+      const th=s.id;
+      Object.keys(bookings[date][th]||{}).forEach(t=>{
+        const st=bookingStatuses[date]?.[th]?.[t];
+        if(bookings[date][th][t]===id && st!=='done') bookings[date][th][t]=null;
+      });
+    });
+  });
+  renderPatientList();renderDeadline();renderBooking();updateLastUpdated();
+  showToast(`${p.name}さんを患者管理から削除しました。実施済の履歴は保持されています`,'#34C759');
 }
 function openExcelImport(){
   openModal(`<div class="modal-handle"></div>
@@ -2900,7 +2983,7 @@ function isOverDeadline(pid){
 function renderBooking(){
   const sel=document.getElementById('bk-pid');
   let html='<option value="">患者を選択</option>';
-  Object.entries(patients).forEach(([id,p])=>{html+=`<option value="${id}">${id}：${p.name}</option>`;});
+  Object.entries(patients).filter(([id])=>!isArchivedPatient(id)).forEach(([id,p])=>{html+=`<option value="${id}">${id}：${p.name}</option>`;});
   sel.innerHTML=html;
   bkWeekOffset=0;
   document.getElementById('bk-info').style.display='none';
@@ -3047,7 +3130,7 @@ async function doAdminBooking(){
 // ---- CSV出力 ----
 function exportCSV(){
   const header='ID,患者名,フリガナ,生年月日,性別,疾患名,担当,期限';
-  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)).map(([id,p])=>{
+  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id)).map(([id,p])=>{
     const dl=p.deadline?dateStr(p.deadline):'';
     const th=p.therapist||'';
     // CSVエスケープ（カンマ・改行を含む場合はダブルクォートで囲む）
@@ -3504,6 +3587,114 @@ async function saveBusinessHours(){
   renderWeekTable();
   showToast('営業ルールを保存しました','#34C759');
 }
+
+
+// ============================================================
+// 実績表
+// 既存の予約キャッシュ（直近期間）とは別に、年度データをSupabaseから取得して集計。
+// ============================================================
+let actualsBookingsCache=[];
+let actualsPriceSettings={rehab2:0,rehab3:0,plan:0,med1:0,med2:0};
+
+function getCurrentFiscalYear(){return TODAY.getMonth()>=3?TODAY.getFullYear():TODAY.getFullYear()-1;}
+function reiwaYear(fy){return fy-2018;}
+function fiscalMonths(fy){const a=[];for(let i=0;i<12;i++){const m=((3+i)%12)+1,y=m>=4?fy:fy+1;a.push({year:y,month:m,ym:`${y}-${String(m).padStart(2,'0')}`});}return a;}
+function monthDays(ym){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate();return Array.from({length:n},(_,i)=>`${ym}-${String(i+1).padStart(2,'0')}`);}
+function isCountableBookedStatus(s){return s==='reserved'||s==='done'||s==='noshow';}
+async function fetchBookingsPaged(from,to){
+  const size=1000;let start=0,all=[];
+  while(true){
+    const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
+      .gte('booking_date',from).lte('booking_date',to).order('booking_date',{ascending:true}).range(start,start+size-1);
+    if(error)throw error;const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
+  }
+  return all;
+}
+async function loadActualsData(fy){
+  const from=`${fy-2}-04-01`,to=`${fy+1}-03-31`;
+  const [bookingsData,pres]=await Promise.all([
+    fetchBookingsPaged(from,to),
+    sb.from('patients').select('id,name,therapist,disease')
+  ]);
+  if(pres.error)throw pres.error;
+  return {months:fiscalMonths(fy),bookings:bookingsData,patientMap:Object.fromEntries((pres.data||[]).map(p=>[p.id,p]))};
+}
+function actualsSum(rows,fn){return rows.reduce((s,b)=>s+(fn(b)?Number(b.unit||2):0),0);}
+function actualsUnique(rows,fn){return new Set(rows.filter(fn).map(b=>b.patient_id).filter(Boolean)).size;}
+function actualsBusinessDays(ym){return monthDays(ym).filter(ds=>!isDayOff(ds)).length;}
+function actualsPtDays(ym,th){return monthDays(ym).filter(ds=>!isTherapistOff(ds,th)).length;}
+function actualsCapacity(ym,th){let n=0;monthDays(ym).forEach(ds=>{if(isTherapistOff(ds,th))return;timesForDate(ds,th).forEach(t=>{if(isSlotAvailable(ds,t,th))n+=2;});});return n;}
+function actualsFirstDone(rows){const f={};rows.filter(b=>b.status==='done'&&b.patient_id).sort((a,b)=>a.booking_date.localeCompare(b.booking_date)).forEach(b=>{if(!f[b.patient_id])f[b.patient_id]=b.booking_date;});return f;}
+function afmt(n){return n==null?'—':Number.isInteger(n)?n.toLocaleString('ja-JP'):Number(n).toFixed(1);}
+function apct(n){return n==null?'—':Number(n).toFixed(2)+'%';}
+function amoney(n){return n?Math.round(n).toLocaleString('ja-JP'):'—';}
+function arow(label,vals,cls=''){return `<tr class="${cls}"><td class="actuals-label">${label}</td>${vals.map(v=>`<td class="${v===0?'zero':''}">${v}</td>`).join('')}</tr>`;}
+function aheader(ms){return `<thead><tr><th class="actuals-label">実績項目</th>${ms.map(m=>`<th>${m.month}月</th>`).join('')}<th>平均</th></tr></thead>`;}
+
+async function loadActualsPriceSettings(){
+  const {data,error}=await sb.from('system_settings').select('key,value').in('key',['actuals_rehab2_unit_price','actuals_rehab3_unit_price','actuals_plan_price','actuals_med1_price','actuals_med2_price']);
+  if(error)throw error;(data||[]).forEach(r=>{if(r.key==='actuals_rehab2_unit_price')actualsPriceSettings.rehab2=Number(r.value)||0;if(r.key==='actuals_rehab3_unit_price')actualsPriceSettings.rehab3=Number(r.value)||0;if(r.key==='actuals_plan_price')actualsPriceSettings.plan=Number(r.value)||0;if(r.key==='actuals_med1_price')actualsPriceSettings.med1=Number(r.value)||0;if(r.key==='actuals_med2_price')actualsPriceSettings.med2=Number(r.value)||0;});
+}
+async function saveActualsPriceSettings(){
+  const ids=['actuals-price2','actuals-price3','actuals-price-plan','actuals-price-med1','actuals-price-med2'],keys=['actuals_rehab2_unit_price','actuals_rehab3_unit_price','actuals_plan_price','actuals_med1_price','actuals_med2_price'];
+  const vals=ids.map(id=>Number(document.getElementById(id)?.value||0));await Promise.all(keys.map((k,i)=>dbSaveSetting(k,String(vals[i]))));
+  actualsPriceSettings={rehab2:vals[0],rehab3:vals[1],plan:vals[2],med1:vals[3],med2:vals[4]};showToast('実績表の単価設定を保存しました','#34C759');renderActuals();
+}
+function renderActualsFiscalYearSelect(){
+  const el=document.getElementById('actuals-fy');if(!el)return;const cur=getCurrentFiscalYear();
+  el.innerHTML=Array.from({length:5},(_,i)=>{const fy=cur-3+i;return `<option value="${fy}" ${fy===cur?'selected':''}>R${reiwaYear(fy)}年度（${fy}）</option>`;}).join('');
+}
+async function renderActuals(){
+  const body=document.getElementById('actuals-body');if(!body)return;
+  const sel=document.getElementById('actuals-fy');if(!sel.options.length)renderActualsFiscalYearSelect();
+  const fy=Number(sel.value||getCurrentFiscalYear());body.innerHTML='<div class="actuals-loading">📊 実績を集計中...</div>';
+  try{
+    await loadActualsPriceSettings();const {months,bookings:allRows}=await loadActualsData(fy);
+    const rows=months.map(m=>allRows.filter(b=>b.booking_date.startsWith(m.ym))),first=actualsFirstDone(allRows);
+    const actual=rows.map(r=>actualsSum(r,b=>b.status==='done')),planned=rows.map(r=>actualsSum(r,isCountableBookedStatus)),cancel=rows.map(r=>actualsSum(r,b=>b.status==='cancelled'));
+    const work=months.map(m=>actualsBusinessDays(m.ym)),cancelRate=cancel.map((v,i)=>(v+planned[i])?v/(v+planned[i])*100:null);
+    const open=months.map((m,i)=>Math.max(0,staffList.reduce((s,t)=>s+actualsCapacity(m.ym,t.id),0)-planned[i]-cancel[i]));
+    const avg=actual.map((v,i)=>work[i]?v/work[i]/Math.max(1,staffList.length):0),patients=rows.map(r=>actualsUnique(r,b=>b.status==='done'));
+    const newP=rows.map((r,i)=>new Set(r.filter(b=>b.status==='done'&&b.patient_id&&first[b.patient_id]===b.booking_date).map(b=>b.patient_id)).size);
+    const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
+    const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtDays(months[i].ym,t.id);return d?v/d:0;}));
+    const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tPlan=total(planned),tNew=total(newP),yearRate=(tCan+tPlan)?tCan/(tCan+tPlan)*100:null;
+    const allAvg=work.reduce((s,v)=>s+v,0)?tAct/work.reduce((s,v)=>s+v,0)/Math.max(1,staffList.length):0;
+    let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
+      <tr class="section"><td colspan="${months.length+2}">基本実績</td></tr>
+      ${arow('営業日数',work.map(afmt).concat(afmt(work.reduce((s,v)=>s+v,0)/12)))}
+      ${arow('実際取得単位数',actual.map(afmt).concat(afmt(tAct/12)),'total')}
+      ${arow('運動器Ⅱ予定取得単位数',planned.map(afmt).concat(afmt(tPlan/12)))}
+      ${arow('脳血管予定取得単位数',months.map(()=>'—').concat('—'))}
+      ${arow('平均取得単位数',avg.map(afmt).concat(afmt(allAvg)),'average')}
+      ${arow('キャンセル単位数',cancel.map(afmt).concat(afmt(tCan/12)))}
+      ${arow('キャンセル率',cancelRate.map(apct).concat(apct(yearRate)))}
+      ${arow('予約空き数',open.map(afmt).concat(afmt(total(open)/12)))}
+      ${arow('医療のみ 患者合計数',months.map(()=>'—').concat('—'))}
+      <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
+      ${staffList.map((t,i)=>arow(t.name,ta[i].map(afmt).concat(afmt(total(ta[i])/12)))).join('')}
+      ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
+      <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
+      ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
+      ${arow('脳血管患者数',months.map(()=>'—').concat('—'))}
+      ${arow('新規患者数（開始）',newP.map(afmt).concat(afmt(tNew/12)))}
+      <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
+      ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
+      ${arow('運動器Ⅲ',months.map(()=> '—').concat('—'))}
+      ${arow('実施計画書 合計',months.map(()=> '—').concat('—'))}
+      ${arow('医1',months.map(()=> '—').concat('—'))}
+      ${arow('医2',months.map(()=> '—').concat('—'))}
+    </tbody></table></div>`;
+    html+=`<div class="card" style="margin:0 16px 14px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">💴 参考額の単価設定</div>
+      <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「運動器Ⅱ」の参考額に反映します。</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+      ${[['actuals-price2','運動器Ⅱ','rehab2'],['actuals-price3','運動器Ⅲ','rehab3'],['actuals-price-plan','計画書','plan'],['actuals-price-med1','医1','med1'],['actuals-price-med2','医2','med2']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
+      </div><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveActualsPriceSettings()">単価を保存</button></div>`;
+    body.innerHTML=html;
+    document.getElementById('actuals-kpi').innerHTML=`<div class="metric"><div class="metric-label">年度</div><div class="metric-value">R${reiwaYear(fy)}</div><div class="metric-sub">${fy}/4〜${fy+1}/3</div></div><div class="metric"><div class="metric-label">年間実施単位</div><div class="metric-value">${afmt(tAct)}</div><div class="metric-sub">実施済のみ</div></div><div class="metric"><div class="metric-label">年間キャンセル</div><div class="metric-value">${afmt(tCan)}</div><div class="metric-sub">${apct(yearRate)}</div></div><div class="metric"><div class="metric-label">新規患者</div><div class="metric-value">${afmt(tNew)}</div><div class="metric-sub">初回実施ベース</div></div>`;
+  }catch(e){console.error(e);body.innerHTML=`<div class="card" style="margin:12px 16px;color:#B00020"><strong>実績表の読み込みに失敗しました。</strong><br><span style="font-size:12px">${String(e.message||e)}</span></div>`;}
+}
+function printActuals(){const old=document.title;document.title='リハビリ実績表';window.print();setTimeout(()=>document.title=old,500);}
 
 // ---- INIT ----
 async function init(){
