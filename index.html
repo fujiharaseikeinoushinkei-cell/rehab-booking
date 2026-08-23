@@ -721,6 +721,7 @@ let holidayData=[];   // 全休診日レコード（period情報含む）
 let leaves={};
 let leaveData=[];
 let weekTableOffset=0;
+let weekTableWeekendMode=false;
 let leaveFilter='';
 let currentPid=null;
 let schedTherapist="",schedView="day",schedOffset=0;
@@ -1524,25 +1525,63 @@ function renderPatientReminder(pid){
 }
 
 // ---- WEEK TABLE ----
-function weekTableNav(d){weekTableOffset+=d;renderWeekTable();}
+// ---- WEEK TABLE ----
+// 基本は月〜金表示。土日が営業日の場合は「次週」で、その週末だけを表示する。
+function weekTableHasWeekendBusiness(ws){
+  const sat=addDays(ws,5), sun=addDays(ws,6);
+  const satStr=dateStr(sat), sunStr=dateStr(sun);
+  const satOpen=staffList.some(s=>hasSpecialBusinessDay(satStr,s.id)) || !isDayOff(satStr);
+  const sunOpen=staffList.some(s=>hasSpecialBusinessDay(sunStr,s.id)) || !isDayOff(sunStr);
+  return satOpen||sunOpen;
+}
+function weekTableWeekendDays(ws){
+  const out=[];
+  [5,6].forEach(i=>{
+    const d=addDays(ws,i),ds=dateStr(d);
+    const open=staffList.some(s=>hasSpecialBusinessDay(ds,s.id)) || !isDayOff(ds);
+    if(open)out.push(d);
+  });
+  return out;
+}
+function weekTableNav(d){
+  const ws=monday(addDays(TODAY,weekTableOffset*7));
+  if(d>0){
+    if(!weekTableWeekendMode && weekTableHasWeekendBusiness(ws)){
+      weekTableWeekendMode=true;
+    }else{
+      weekTableOffset+=1;
+      weekTableWeekendMode=false;
+    }
+  }else{
+    if(weekTableWeekendMode){
+      weekTableWeekendMode=false;
+    }else{
+      const prevWs=monday(addDays(TODAY,(weekTableOffset-1)*7));
+      if(weekTableOffset>0 && weekTableHasWeekendBusiness(prevWs)){
+        weekTableOffset-=1;
+        weekTableWeekendMode=true;
+      }else if(weekTableOffset>0){
+        weekTableOffset-=1;
+      }
+    }
+  }
+  renderWeekTable();
+}
 
 function renderWeekTable(){
   const el=document.getElementById('weektable-body');
   if(!el)return;
   const ws=monday(addDays(TODAY,weekTableOffset*7));
-  const days=[];
-  // 日曜日は通常表示しないが、臨時営業日が登録されている場合のみ列を追加する
-  const sunday=addDays(ws,-1);
-  const sundayStr=dateStr(sunday);
-  const sundayHasSpecial=staffList.some(s=>hasSpecialBusinessDay(sundayStr,s.id));
-  if(sundayHasSpecial)days.push(sunday);
-  for(let i=0;i<6;i++){const d=addDays(ws,i);days.push(d);}
+  const days=weekTableWeekendMode?weekTableWeekendDays(ws):[0,1,2,3,4].map(i=>addDays(ws,i));
+  const isWeekendView=weekTableWeekendMode;
 
-  const we=days[days.length-1];
-  const weekStart=days[0];
-  const startLabel=sundayHasSpecial?`${weekStart.getMonth()+1}月${weekStart.getDate()}日（日）`:`${ws.getMonth()+1}月${ws.getDate()}日（月）`;
-  document.getElementById('weektable-label').textContent=
-    `${startLabel}〜${we.getMonth()+1}月${we.getDate()}日（土）`;
+  if(isWeekendView){
+    const labels=days.map(d=>`${d.getMonth()+1}月${d.getDate()}日（${['日','月','火','水','木','金','土'][d.getDay()]}）`);
+    document.getElementById('weektable-label').textContent=labels.length?`週末営業：${labels.join('・')}`:'週末の営業はありません';
+  }else{
+    document.getElementById('weektable-label').textContent=
+      `${ws.getMonth()+1}月${ws.getDate()}日（月）〜${addDays(ws,4).getMonth()+1}月${addDays(ws,4).getDate()}日（金）`;
+  }
 
   // 全スロット時間を収集（正規化して重複排除）
   const allTimes=new Set();
@@ -1555,7 +1594,9 @@ function renderWeekTable(){
   const sortedTimes=[...allTimes].sort((a,b)=>timeMins(a)-timeMins(b));
 
   if(!sortedTimes.length){
-    el.innerHTML='<div class="empty">予約枠が設定されていません<br><small>管理画面「枠設定」から追加してください</small></div>';
+    el.innerHTML=isWeekendView
+      ?'<div class="empty">この週に土曜日・日曜日の営業はありません</div>'
+      :'<div class="empty">予約枠が設定されていません<br><small>管理画面「枠設定」から追加してください</small></div>';
     return;
   }
 
@@ -1564,8 +1605,6 @@ function renderWeekTable(){
   const TH_NAMES=staffList.map(s=>s.name.replace(/^PT ?/,''));
 
   let html=`<table style="border-collapse:collapse;font-size:11px;min-width:500px;width:100%">`;
-
-  // ヘッダー行1: 曜日
   html+=`<thead><tr>
     <th style="border:1px solid #D1D1D6;padding:4px 6px;background:#F9FAFB;min-width:64px;position:sticky;left:0;z-index:2"></th>`;
   days.forEach(d=>{
@@ -1582,8 +1621,6 @@ function renderWeekTable(){
     </th>`;
   });
   html+=`</tr>`;
-
-  // ヘッダー行2: 担当PT
   html+=`<tr><th style="border:1px solid #D1D1D6;background:#F9FAFB;position:sticky;left:0;z-index:2"></th>`;
   days.forEach(d=>{
     const ds=dateStr(d);
@@ -1599,30 +1636,21 @@ function renderWeekTable(){
   });
   html+=`</tr></thead><tbody>`;
 
-  // データ行
   sortedTimes.forEach(time=>{
     html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">${time}</td>`;
     days.forEach(d=>{
       const ds=dateStr(d);
-      const dow=d.getDay();
       const dayOff=isDayOff(ds);
       THERAPISTS.forEach((th)=>{
-        // slotDefまたは臨時営業日に存在するか（正規化して比較）
         const defTimes=timesForDate(ds,th);
         const hasDef=defTimes.includes(time);
-
-        // PT休暇・午後休診・臨時営業日チェック（isSlotAvailableが臨時営業日の上書きを含めて判定する）
         const off=!isSlotAvailable(ds,time,th);
-
         if(!hasDef){
-          // 枠定義なし
           html+=`<td style="border:1px solid #E5E7EB;background:#FAFAFA;padding:4px;min-width:${CELL_W}"></td>`;
-        } else if(off){
-          // 休診・休暇
+        }else if(off){
           const lvFull=isLeave(ds,th)&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
           html+=`<td style="border:1px solid #E5E7EB;background:#F3F4F6;padding:4px;text-align:center;min-width:${CELL_W};font-size:9px;color:#9CA3AF">${lvFull?'休暇':dayOff?'休診':'休'}</td>`;
-        } else {
-          // 正規化したtimeでbookingsを参照（上段＝通常の枠、下段＝1単位登録した後半20分）
+        }else{
           const bottomTime=getSecondUnitTime(time);
           const pid=bookings[ds]?.[th]?.[time];
           const status=bookingStatuses[ds]?.[th]?.[time]||'';
@@ -1632,7 +1660,6 @@ function renderWeekTable(){
           const bUnit=bookingUnits[ds]?.[th]?.[bottomTime]||2;
           const hasTop=pid&&patients[pid];
           const hasBottom=bPid&&patients[bPid];
-
           function unitLine(uPid,uStatus,uTime,small){
             const name=patients[uPid].name;
             const tentative=isTentativePatient(uPid);
@@ -1647,57 +1674,41 @@ function renderWeekTable(){
           function addLine(addTime){
             return `<div onclick="event.stopPropagation();weekTableBookModal('${ds}','${th}','${addTime}')" style="cursor:pointer;margin-top:2px;padding:1px 0;color:#93C5FD;font-size:9px">＋追加</div>`;
           }
-
           if(hasTop||hasBottom){
-            // 「＋追加」は、埋まっている方が1単位（unit===1）登録の場合のみ表示する
-            // （通常の2単位予約が入っている場合は枠全体を使用しているため、追加登録はできない）
             const topCell=hasTop?unitLine(pid,status,time,false):(hasBottom&&bUnit===1?addLine(time):'');
             const bottomCell=hasBottom?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&unit===1?addLine(bottomTime):'');
-            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">
-              ${topCell}
-              ${bottomCell}
-            </td>`;
-          } else {
-            html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')">
-              <div style="font-size:10px;color:#1D4ED8">○</div>
-            </td>`;
+            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}</td>`;
+          }else{
+            html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`;
           }
         }
       });
     });
     html+=`</tr>`;
   });
-  // ---- 担当ごとの「実施済」「不在」単位集計（日ごと・列ごと） ----
   html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">単位</td>`;
   days.forEach(d=>{
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let doneUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{
-        if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);
-      });
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
   html+=`</tr>`;
-
   html+=`<tr><td style="border:1px solid #D1D1D6;padding:5px 6px;background:#F9FAFB;font-weight:600;white-space:nowrap;position:sticky;left:0;z-index:1;font-size:11px">不在</td>`;
   days.forEach(d=>{
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let noshowUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{
-        if(status==='noshow')noshowUnits+=(bookingUnits[ds]?.[th]?.[t]||2);
-      });
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='noshow')noshowUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#B00020;background:#FEF2F2">${noshowUnits||''}</td>`;
     });
   });
-  html+=`</tr>`;
-
-  html+=`</tbody></table>`;
+  html+=`</tr></tbody></table>`;
   el.innerHTML=html;
   const sumEl=document.getElementById('weektable-summary');
-  if(sumEl)sumEl.innerHTML='';
+  if(sumEl)sumEl.innerHTML=isWeekendView?'<div style="font-size:11px;color:#8E8E93;margin-top:4px">※ 土曜日・日曜日に営業がある場合のみ表示しています。</div>':'';
 }
 
 function weekTableBookModal(ds,therapist,time){
@@ -2375,6 +2386,7 @@ function adminLogin(){
     renderNotifications();renderDeadline();renderSettingsDisplay();
     renderTodaySchedule();
     weekTableOffset=0;
+    weekTableWeekendMode=false;
     populateClinicSettingsInputs();
     document.getElementById('s-start').value=settings.start;
     document.getElementById('s-end').value=settings.end;
@@ -3765,9 +3777,9 @@ async function renderActuals(){
       <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
       ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
       ${arow('運動器Ⅲ',months.map(()=> '—').concat('—'))}
-      ${arow('実施計画書 合計',months.map(()=> '—').concat('—'))}
-      ${arow('医1',months.map(()=> '—').concat('—'))}
-      ${arow('医2',months.map(()=> '—').concat('—'))}
+      ${arow('実施計画書 合計',months.map((m,i)=>amoney(newP[i]*3000 + Math.max(0,patients[i]-newP[i])*2400)).concat(amoney(months.reduce((s,m,i)=>s + newP[i]*3000 + Math.max(0,patients[i]-newP[i])*2400,0)/12)))}
+      ${arow('リハビリテーション計画書料イ',months.map((m,i)=>amoney(newP[i]*3000)).concat(amoney(total(newP)*3000/12)))}
+      ${arow('リハビリテーション計画書料ロ',months.map((m,i)=>amoney(Math.max(0,patients[i]-newP[i])*2400)).concat(amoney(months.reduce((s,m,i)=>s + Math.max(0,patients[i]-newP[i])*2400,0)/12)))}
     </tbody></table></div>`;
     html+=`<div class="card" style="margin:0 16px 14px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">💴 参考額の単価設定</div>
       <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「運動器Ⅱ」の参考額に反映します。</div>
