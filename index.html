@@ -1572,7 +1572,31 @@ function weekTableWeekendDays(ws){
   });
   return out;
 }
-function weekTableNav(d){
+async function loadWeekTableBookings(ws){
+  const from=dateStr(ws), to=dateStr(addDays(ws,6));
+  try{
+    const {data,error}=await sb.from('bookings')
+      .select('booking_date,time_slot,therapist,patient_id,status,unit')
+      .gte('booking_date',from).lte('booking_date',to);
+    if(error) throw error;
+    (data||[]).forEach(b=>{
+      if(!bookings[b.booking_date])bookings[b.booking_date]={};
+      if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+      if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
+      if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
+      if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+      if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
+      const t=normalizeTime(b.time_slot);
+      bookings[b.booking_date][b.therapist][t]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+      bookingStatuses[b.booking_date][b.therapist][t]=b.status;
+      bookingUnits[b.booking_date][b.therapist][t]=b.unit||2;
+    });
+  }catch(e){
+    console.error('週間表の過去データ取得失敗',e);
+  }
+}
+
+async function weekTableNav(d){
   const ws=monday(addDays(TODAY,weekTableOffset*7));
   if(d>0){
     if(!weekTableWeekendMode && weekTableHasWeekendBusiness(ws)){
@@ -1586,18 +1610,20 @@ function weekTableNav(d){
       weekTableWeekendMode=false;
     }else{
       const prevWs=monday(addDays(TODAY,(weekTableOffset-1)*7));
-      if(weekTableOffset>0 && weekTableHasWeekendBusiness(prevWs)){
+      if(weekTableHasWeekendBusiness(prevWs)){
         weekTableOffset-=1;
         weekTableWeekendMode=true;
-      }else if(weekTableOffset>0){
+      }else{
         weekTableOffset-=1;
       }
     }
   }
-  renderWeekTable();
+  await renderWeekTable();
 }
 
-function renderWeekTable(){
+async function renderWeekTable(){
+  const wsForLoad=monday(addDays(TODAY,weekTableOffset*7));
+  await loadWeekTableBookings(wsForLoad);
   const el=document.getElementById('weektable-body');
   if(!el)return;
   const ws=monday(addDays(TODAY,weekTableOffset*7));
