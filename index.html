@@ -3786,7 +3786,6 @@ async function renderActuals(){
 
     // 実際取得単位数は「実施済」のみ。
     const actual=rows.map(r=>actualsSum(r,b=>b.status==='done'));
-    const planned=rows.map(r=>actualsSum(r,isCountableBookedStatus));
 
     // キャンセル単位数は「お知らせ」→「患者からの予約変更」のうち、
     // 患者自身のキャンセル通知だけを1件=2単位として集計。
@@ -3798,7 +3797,8 @@ async function renderActuals(){
     }).length*2);
 
     const work=months.map(m=>actualsBusinessDays(m.ym));
-    const cancelRate=cancel.map((v,i)=>(v+planned[i])?v/(v+planned[i])*100:null);
+    // キャンセル率は、実際取得単位数と患者キャンセル単位数の合計を分母とする。
+    const cancelRate=cancel.map((v,i)=>(actual[i]+v)?v/(actual[i]+v)*100:null);
 
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
@@ -3830,7 +3830,7 @@ async function renderActuals(){
 
     const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtDays(months[i].ym,t.id);return d?v/d:0;}));
-    const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tPlan=total(planned),tNew=total(newP),yearRate=(tCan+tPlan)?tCan/(tCan+tPlan)*100:null;
+    const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
     const allAvg=work.reduce((s,v)=>s+v,0)?tAct/work.reduce((s,v)=>s+v,0)/Math.max(1,staffList.length):0;
 
     let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
