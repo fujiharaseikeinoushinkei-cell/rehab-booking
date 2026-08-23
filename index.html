@@ -337,7 +337,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <!-- 本日の予定 -->
     <div style="margin-bottom:16px">
       <div style="font-size:15px;font-weight:600;margin-bottom:10px">📋 本日の予定</div>
-      <div id="today-th-buttons" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"></div>
       <div id="today-schedule"></div>
     </div>
     <hr style="border:none;border-top:1px solid #E5E5EA;margin-bottom:16px">
@@ -1405,7 +1404,7 @@ function switchTab(prefix,name,el){
   el.classList.add('active');
   if(name==='mybook')renderMyBook();
   if(name==='reserve')renderReserve();
-  if(name==='notify'){renderTodayTherapistButtons();renderTodaySchedule(todayTherapist||staffList[0]?.id);renderNotifications();}
+  if(name==='notify'){renderTodaySchedule();renderNotifications();}
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
@@ -1420,51 +1419,50 @@ function switchTab(prefix,name,el){
   if(name==='actuals'){renderActuals();}
 }
 
-let todayTherapist='';
-function renderTodayTherapistButtons(){
-  const el=document.getElementById('today-th-buttons');
-  if(!el)return;
-  if(!todayTherapist)todayTherapist=staffList[0]?.id||'';
-  el.innerHTML=staffList.map((s,i)=>
-    `<button class="th-btn${s.id===todayTherapist?' active-t':''}" data-staff-id="${s.id}" onclick="selectTodayTherapist('${s.id}')">${s.name}</button>`
-  ).join('');
-}
-function selectTodayTherapist(t){
-  todayTherapist=t;
-  document.querySelectorAll('#today-th-buttons .th-btn').forEach(btn=>{
-    btn.className='th-btn'+(btn.dataset.staffId===t?' active-t':'');
-  });
-  renderTodaySchedule(t);
-}
-function renderTodaySchedule(th){
+function renderTodaySchedule(){
   const el=document.getElementById('today-schedule');
   if(!el)return;
-  todayTherapist=th;
   const ds=dateStr(TODAY);
   const dow=TODAY.getDay();
-  if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,th)){
-    el.innerHTML='<div class="card" style="text-align:center;color:#B00020;font-size:13px">🔴 本日は休診日です</div>';
+  const clinicClosed=isHoliday(ds)||dow===0;
+  ensureBookingShape(ds);
+
+  if(!staffList.length){
+    el.innerHTML='<div class="card" style="text-align:center;color:#8E8E93;font-size:13px">担当者が登録されていません</div>';
     return;
   }
-  ensureBookingShape(ds);
-  const times=timesForDate(ds,th).sort((a,b)=>{
-    const [ah,am]=a.split(':').map(Number);
-    const [bh,bm]=b.split(':').map(Number);
-    return (ah*60+am)-(bh*60+bm);
-  });
-  if(!times.length){el.innerHTML='<div style="font-size:13px;color:#8E8E93;padding:8px 0">本日の予約枠はありません</div>';return;}
-  let html='<div class="card" style="padding:10px 14px">';
-  let hasPatient=false;
-  times.forEach(t=>{
-    const pid=bookings[ds]?.[th]?.[t];
-    const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
-    const empty=!pid;
-    if(!empty)hasPatient=true;
-    html+=`<div class="sched-row">
-      <span class="sched-time" style="font-weight:600">${t}</span>
-      <span class="sched-name" style="${empty?'color:#C7C7CC':'font-weight:500'}">${empty?'空き':(patients[pid]?.name||'不明')}</span>
-      ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px">空き</span>'}
-    </div>`;
+
+  let html='<div style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch">';
+  staffList.forEach(s=>{
+    const th=s.id;
+    const specialOpen=hasSpecialBusinessDay(ds,th);
+    const closed=clinicClosed&&!specialOpen;
+    const times=closed?[]:timesForDate(ds,th).sort((a,b)=>{
+      const [ah,am]=a.split(':').map(Number);
+      const [bh,bm]=b.split(':').map(Number);
+      return (ah*60+am)-(bh*60+bm);
+    });
+
+    html+=`<div class="card" style="flex:1 0 250px;max-width:360px;padding:10px 12px;margin:0">
+      <div style="font-size:14px;font-weight:700;padding:2px 2px 9px;margin-bottom:4px;border-bottom:1px solid #E5E5EA;white-space:nowrap">${s.name}</div>`;
+
+    if(closed){
+      html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:18px 4px">🔴 本日は休診日です</div>';
+    }else if(!times.length){
+      html+='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:18px 4px">本日の予約枠はありません</div>';
+    }else{
+      times.forEach(t=>{
+        const pid=bookings[ds]?.[th]?.[t];
+        const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
+        const empty=!pid;
+        html+=`<div class="sched-row" style="min-width:0">
+          <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
+          <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
+          ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
+        </div>`;
+      });
+    }
+    html+='</div>';
   });
   html+='</div>';
   el.innerHTML=html;
@@ -2359,8 +2357,7 @@ function adminLogin(){
     const now=new Date();
     document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
     renderNotifications();renderDeadline();renderSettingsDisplay();
-    renderTodayTherapistButtons();
-    renderTodaySchedule(todayTherapist||staffList[0]?.id);
+    renderTodaySchedule();
     weekTableOffset=0;
     populateClinicSettingsInputs();
     document.getElementById('s-start').value=settings.start;
@@ -3526,8 +3523,7 @@ function refreshStaffDependentUI(){
   renderStaffListArea();
   todayTherapist=staffList.find(s=>s.id===todayTherapist)?todayTherapist:(staffList[0]?.id||'');
   leaveFilter=staffList.find(s=>s.id===leaveFilter)?leaveFilter:(staffList[0]?.id||'');
-  renderTodayTherapistButtons();
-  renderTodaySchedule(todayTherapist);
+  renderTodaySchedule();
   renderLeaveFilterButtons();
   populateStaffSelect('slot-th');
   populateStaffSelect('lv-th');
