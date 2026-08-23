@@ -129,6 +129,11 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .tab2:last-child{border-right:none}
 .tab2.active{color:#007AFF;font-weight:600;background:#EFF6FF}
 
+.admin-menu-grid{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E5EA;}
+.admin-menu-grid>.tab2{border-right:1px solid #E5E5EA;border-bottom:1px solid #E5E5EA;}
+.admin-menu-pair{grid-column:span 4;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid #E5E5EA;}
+.admin-menu-pair .tab2{border-right:1px solid #E5E5EA;}
+@media(max-width:700px){.admin-menu-grid{grid-template-columns:repeat(2,1fr)}.admin-menu-pair{grid-column:span 2}}
 /* ===== 実績表 ===== */
 .actuals-screen{background:#F5F5F7}
 .actuals-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:1px solid #E5E5EA}
@@ -307,28 +312,23 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <button class="btn btn-sm" onclick="showScreen('s-top')">戻る</button>
   </div>
   <div style="background:#fff;border-bottom:1px solid #E5E5EA">
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E5EA">
+    <div class="admin-menu-grid">
       <div class="tab2 active" onclick="switchTab('a','notify',this)">お知らせ</div>
       <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
       <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
       <div class="tab2" onclick="switchTab('a','schedule',this)">スケジュール</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E5EA">
       <div class="tab2" onclick="switchTab('a','status',this)">ステータス</div>
       <div class="tab2" onclick="switchTab('a','patients',this)">患者管理</div>
       <div class="tab2" onclick="switchTab('a','booking',this)">代理予約</div>
       <div class="tab2" onclick="switchTab('a','slots',this)">枠設定</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(140px,1fr))">
       <div class="tab2" onclick="switchTab('a','holidays',this)">休診日</div>
       <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
       <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
       <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
-      <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));border-top:1px solid #E5E5EA">
-      <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
-      <div></div><div></div><div></div><div></div>
+      <div class="admin-menu-pair">
+        <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
+        <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
+      </div>
     </div>
   </div>
 
@@ -1061,6 +1061,17 @@ let archivedPatientIds = new Set();
 let rehabStartDates = {};
 // 患者ごとの介護保険利用有無（患者管理のチェック状態を保持）
 let careInsurancePatients = {};
+// 患者ごとのリハビリ算定開始日（system_settingsで保持）
+let rehabBillingStartDates = {};
+async function saveRehabBillingStartDates(){
+  await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
+}
+function calcRehabDeadline(dateStr){
+  if(!dateStr)return '';
+  const d=parseLocalDate(dateStr);
+  d.setDate(d.getDate()+150);
+  return dateStr(d);
+}
 async function saveRehabStartDates(){
   await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
 }
@@ -1132,6 +1143,12 @@ async function loadAllData(){
         const parsed=JSON.parse(r.value||'{}');
         careInsurancePatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
       }catch(e){ careInsurancePatients={}; }
+    }
+    if(r.key==='patient_rehab_billing_start_dates'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        rehabBillingStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ rehabBillingStartDates={}; }
     }
     if(r.key==='last_updated'){
       try{
@@ -1755,8 +1772,9 @@ function weekTableBookModal(ds,therapist,time){
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
         ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
         ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
+        <option value="three_units">3単位（60分）</option>
       </select>
-      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位」は20分のみの予約です。この枠は「${baseTime}」と「${secondTime}」の2つに分けて、それぞれ別の患者を登録できます。</p>
+      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位」は20分、「2単位」は40分、「3単位」は60分です。3単位登録では1件の予約を3単位として登録します。</p>
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -1835,8 +1853,9 @@ async function weekTableDoBook(ds,therapist,time){
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
   const isHalf=auto==='half_1'||auto==='half_2';
-  const actualTime=auto==='half_1'?baseTime:auto==='half_2'?secondTime:time;
-  const unit=isHalf?1:2;
+  const isThreeUnits=auto==='three_units';
+  const actualTime=auto==='half_1'?baseTime:auto==='half_2'?secondTime:(isThreeUnits?baseTime:time);
+  const unit=isHalf?1:(isThreeUnits?3:2);
   const normTime=normalizeTime(actualTime);
 
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
@@ -1859,7 +1878,7 @@ async function weekTableDoBook(ds,therapist,time){
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
   const d=parseLocalDate(ds);
-  const unitNote=isHalf?'【1単位】':'';
+  const unitNote=isHalf?'【1単位】':(isThreeUnits?'【3単位・60分】':'');
   await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
 
   // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
@@ -2865,11 +2884,18 @@ function openAddPatient(){
     <div class="input-group"><label>疾患名</label><input type="text" id="np-disease" placeholder="変形性膝関節症"></div>
     <div class="input-group"><label>担当セラピスト</label><select id="np-th">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="np-rehab-start"></div>
+    <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="np-rehab-billing-start" onchange="autoCalcNewPatientDeadline()"></div>
     <div class="input-group"><label>介護保険</label><label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" id="np-care-insurance" style="width:18px;height:18px"> 有</label></div>
-    <div class="input-group"><label>リハ期限</label><input type="date" id="np-dl"></div>
+    <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="np-dl" readonly></div>
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`);
+}
+
+function autoCalcNewPatientDeadline(){
+  const start=document.getElementById('np-rehab-billing-start')?.value||'';
+  const dl=document.getElementById('np-dl');
+  if(dl)dl.value=calcRehabDeadline(start);
 }
 
 function checkPatientIdDuplicate(val){
@@ -2896,18 +2922,21 @@ async function saveNewPatient(){
   if(patients[id]){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
   const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
+  const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
   const careInsurance=document.getElementById('np-care-insurance').checked;
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   const ok=await dbAddPatient(id,newP);
   if(!ok){errEl.textContent='登録に失敗しました';errEl.style.display='block';btn.disabled=false;btn.textContent='登録する';return;}
   patients[id]=newP;
   rehabStartDates[String(id)]=rehabStartDate||'';
+  rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
   await saveRehabStartDates();
+  await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
@@ -2924,20 +2953,28 @@ function openEditPatient(id){
     <div class="input-group"><label>疾患名</label><input type="text" id="ep-disease" value="${p.disease}"></div>
     <div class="input-group"><label>担当</label><select id="ep-th">${staffList.map(s=>`<option value="${s.id}" ${p.therapist===s.id?'selected':''}>${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="ep-rehab-start" value="${p.rehabStartDate||''}"></div>
+    <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="ep-rehab-billing-start" value="${p.rehabBillingStartDate||''}" onchange="autoCalcEditPatientDeadline()"></div>
     <div class="input-group"><label>介護保険</label><label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" id="ep-care-insurance" ${p.careInsurance?'checked':''} style="width:18px;height:18px"> 有</label></div>
-    <div class="input-group"><label>リハ期限</label><input type="date" id="ep-dl" value="${dl}"></div>
+    <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="ep-dl" value="${dl}" readonly></div>
     <div class="input-group"><label>備考</label><input type="text" id="ep-note" value="${p.note||''}"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-block" onclick="closeModal()">キャンセル</button>
       <button class="btn btn-primary btn-block" id="ep-submit" onclick="saveEditPatient('${id}')">保存</button>
     </div>`);
 }
+function autoCalcEditPatientDeadline(){
+  const start=document.getElementById('ep-rehab-billing-start')?.value||'';
+  const dl=document.getElementById('ep-dl');
+  if(dl)dl.value=calcRehabDeadline(start);
+}
+
 async function saveEditPatient(id){
   const p=patients[id];
   const updated={name:document.getElementById('ep-name').value.trim()||p.name,kana:document.getElementById('ep-kana').value,
     dob:document.getElementById('ep-dob').value,gender:document.getElementById('ep-gender').value,
     disease:document.getElementById('ep-disease').value,therapist:document.getElementById('ep-th').value,
     rehabStartDate:document.getElementById('ep-rehab-start').value,
+    rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').checked,
     deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
     note:document.getElementById('ep-note').value};
@@ -2947,8 +2984,10 @@ async function saveEditPatient(id){
   if(!ok){showToast('保存に失敗しました');return;}
   Object.assign(p,updated);
   rehabStartDates[String(id)]=updated.rehabStartDate||'';
+  rehabBillingStartDates[String(id)]=updated.rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=!!updated.careInsurance;
   await saveRehabStartDates();
+  await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
   await dbLog('admin','edit_patient',`${updated.name}（${id}）を編集`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
