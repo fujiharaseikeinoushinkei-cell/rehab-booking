@@ -1409,13 +1409,22 @@ async function dbUpdatePatient(id,p){
 }
 
 async function dbDeletePatient(id){
-  // 「実施済」は実績・履歴として残す。その他の予約だけ削除する。
+  // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
+  // 5年より古い実施済予約は削除し、未実施の予約も削除する。
+  const cutoff=new Date();
+  cutoff.setFullYear(cutoff.getFullYear()-5);
+  const cutoffStr=cutoff.toISOString().split('T')[0];
+
+  const {error:oldDoneErr}=await sb.from('bookings').delete()
+    .eq('patient_id',id).eq('status','done').lt('booking_date',cutoffStr);
+  if(oldDoneErr){console.error('5年超の実施済履歴削除失敗',oldDoneErr);return false;}
+
   const {error:bookErr}=await sb.from('bookings').delete()
     .eq('patient_id',id).neq('status','done');
   if(bookErr){console.error('患者削除時の予約削除失敗',bookErr);return false;}
 
   // 患者レコード自体は削除せず、アーカイブ扱いにする。
-  // これにより、実施済 booking の patient_id → 患者名を保持できる。
+  // これにより、直近5年以内の実施済 booking の patient_id → 患者名を保持できる。
   archivedPatientIds.add(String(id));
   await saveArchivedPatientIds();
   return true;
