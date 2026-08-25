@@ -1510,7 +1510,7 @@ function renderTodaySchedule(){
         const pid=bookings[ds]?.[th]?.[t];
         const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
         const empty=!pid;
-        html+=`<div class="sched-row" style="min-width:0">
+        html+=`<div class="sched-row" style="min-width:0;${!empty?'cursor:pointer;':''}" ${!empty?`onclick="weekTableStatusModal('${ds}','${th}','${t}')" title="クリックして実施済・キャンセル等を変更"`:''}>
           <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
           <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
           ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
@@ -1976,7 +1976,10 @@ async function wtUpdateStatus(ds,therapist,time,status){
   const label={done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
   await dbAddNotification(`${pName} ${ds} ${time} を「${label}」に変更【管理者】`,'admin');
   await reloadBookings();
-  closeModal();renderWeekTable();
+  closeModal();
+  renderWeekTable();
+  renderTodaySchedule();
+  renderNotifications();
   showToast(`${label}に変更しました`,'#34C759');
 }
 
