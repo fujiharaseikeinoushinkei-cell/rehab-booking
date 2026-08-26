@@ -219,15 +219,20 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="top-availability-calendar" class="card" style="margin-top:12px;padding:12px;text-align:left">
       <div style="font-size:14px;font-weight:700;text-align:center;margin-bottom:4px">📅 リハビリ空き状況カレンダー</div>
       <div style="font-size:11px;color:#8E8E93;text-align:center;margin-bottom:8px">空きがある日付に色がついています。日付をクリックするとその日の予約画面へ移動します。</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <button class="btn btn-sm" onclick="topCalNav(-1)">‹</button>
-        <span id="top-cal-label" style="flex:1;text-align:center;font-size:14px;font-weight:600"></span>
-        <button class="btn btn-sm" onclick="topCalNav(1)">›</button>
+      <div id="top-cal-start" style="text-align:center;padding:8px 4px 4px">
+        <button class="btn btn-primary" onclick="topCalShow()" style="min-width:120px">表示</button>
       </div>
-      <div id="top-cal-grid"></div>
-      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#8E8E93">
-        <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#D1F0DF;vertical-align:-2px;margin-right:3px"></span>空きあり</span>
-        <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#FFE0E0;vertical-align:-2px;margin-right:3px"></span>休診</span>
+      <div id="top-cal-content" style="display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <button class="btn btn-sm" onclick="topCalNav(-1)">‹</button>
+          <span id="top-cal-label" style="flex:1;text-align:center;font-size:14px;font-weight:600"></span>
+          <button class="btn btn-sm" onclick="topCalNav(1)">›</button>
+        </div>
+        <div id="top-cal-grid"></div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#8E8E93">
+          <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#D1F0DF;vertical-align:-2px;margin-right:3px"></span>空きあり</span>
+          <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#FFE0E0;vertical-align:-2px;margin-right:3px"></span>休診</span>
+        </div>
       </div>
     </div>
     <button class="btn btn-block" onclick="showScreen('s-admin-login')" style="font-size:15px;padding:14px;color:#8E8E93">
@@ -1481,7 +1486,7 @@ function showScreen(id){
   if(pwOld)pwOld.value='';
   if(pwNew)pwNew.value='';
   if(pwNew2)pwNew2.value='';
-  if(id==='s-top')setTimeout(()=>renderTopAvailabilityCalendar(),0);
+  if(id==='s-top')topCalResetDisplay();
 }
 function switchTab(prefix,name,el){
   const all=prefix==='p'?['mybook','reserve','history']:
@@ -2171,6 +2176,21 @@ async function deleteLeave(id,th,ds){
 }
 
 // ---- TOP AVAILABILITY CALENDAR ----
+function topCalResetDisplay(){
+  const start=document.getElementById('top-cal-start');
+  const content=document.getElementById('top-cal-content');
+  const grid=document.getElementById('top-cal-grid');
+  if(start)start.style.display='block';
+  if(content)content.style.display='none';
+  if(grid)grid.innerHTML='';
+}
+function topCalShow(){
+  const start=document.getElementById('top-cal-start');
+  const content=document.getElementById('top-cal-content');
+  if(start)start.style.display='none';
+  if(content)content.style.display='block';
+  renderTopAvailabilityCalendar();
+}
 function topCalNav(delta){
   topCalMonth+=delta;
   if(topCalMonth>11){topCalMonth=0;topCalYear++;}
