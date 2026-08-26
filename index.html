@@ -1247,13 +1247,25 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   if(exErr) console.warn('重複チェックエラー',exErr);
 
   // 取得結果の時間を正規化して比較し、同じ枠の既存行を探す
-  const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
-  console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
+  const rows=(exRows||[]).map(r=>({...r,time_slot:normalizeTime(r.time_slot)}));
+  const existing=rows.find(r=>r.time_slot===normTime);
+  console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:rows.map(r=>({t:r.time_slot,s:r.status,u:r.unit}))});
 
-  // すでに「予約済み（reserved）」「実施済み（done）」「来なかった（noshow）」の行があれば拒否
-  if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
-    const existName=existing.patient_id&&patients[existing.patient_id]
-      ?patients[existing.patient_id].name:'別の患者';
+  // 3単位（60分）は開始枠＋後半20分＋次の20分の3枠を占有する。
+  // どこか1枠でも予約済み・実施済み・不在なら登録を拒否し、二重予約を防ぐ。
+  if(unit===3){
+    const t1=normTime;
+    const t2=normalizeTime(getSecondUnitTime(t1));
+    const t3=normalizeTime(getSecondUnitTime(t2));
+    const occupied=rows.filter(r=>[t1,t2,t3].includes(r.time_slot) && (r.status==='reserved'||r.status==='noshow'||r.status==='done'));
+    if(occupied.length){
+      const hit=occupied[0];
+      const existName=hit.patient_id&&patients[hit.patient_id]?patients[hit.patient_id].name:'別の患者';
+      const reasonLabel=hit.status==='noshow'?'（来なかった扱い）':hit.status==='done'?'（実施済み）':'';
+      return{ok:false,reason:`3単位（60分）に必要な時間枠（${t1}〜${t3}）の一部が${existName}さん${reasonLabel}で使用中です。別の時間をお選びください。`};
+    }
+  }else if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
+    const existName=existing.patient_id&&patients[existing.patient_id]?patients[existing.patient_id].name:'別の患者';
     const reasonLabel=existing.status==='noshow'?'（来なかった扱い）':existing.status==='done'?'（実施済み）':'';
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さん${reasonLabel}が使用中です。別の時間をお選びください。`};
   }
@@ -1411,9 +1423,9 @@ async function dbUpdatePatient(id,p){
 async function dbDeletePatient(id){
   // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
   // 5年より古い実施済予約は削除し、未実施の予約も削除する。
-  const cutoff=new Date();
+  const cutoff=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
   cutoff.setFullYear(cutoff.getFullYear()-5);
-  const cutoffStr=cutoff.toISOString().split('T')[0];
+  const cutoffStr=dateStr(cutoff);
 
   const {error:oldDoneErr}=await sb.from('bookings').delete()
     .eq('patient_id',id).eq('status','done').lt('booking_date',cutoffStr);
@@ -1581,8 +1593,10 @@ function weekTableWeekendDays(ws){
   });
   return out;
 }
+let weekTableLoadError='';
 async function loadWeekTableBookings(ws){
   const from=dateStr(ws), to=dateStr(addDays(ws,6));
+  weekTableLoadError='';
   try{
     const {data,error}=await sb.from('bookings')
       .select('booking_date,time_slot,therapist,patient_id,status,unit')
@@ -1601,6 +1615,7 @@ async function loadWeekTableBookings(ws){
       bookingUnits[b.booking_date][b.therapist][t]=b.unit||2;
     });
   }catch(e){
+    weekTableLoadError='予約データの取得に失敗しました。インターネット接続とSupabaseの状態を確認して、「再読み込み」をお試しください。';
     console.error('週間表の過去データ取得失敗',e);
   }
 }
@@ -1635,6 +1650,10 @@ async function renderWeekTable(){
   await loadWeekTableBookings(wsForLoad);
   const el=document.getElementById('weektable-body');
   if(!el)return;
+  if(weekTableLoadError){
+    el.innerHTML=`<div style="padding:18px;text-align:center;background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;color:#9A3412;font-size:13px">⚠️ ${weekTableLoadError}<br><button class="btn btn-sm" style="margin-top:10px" onclick="renderWeekTable()">再読み込み</button></div>`;
+    return;
+  }
   const ws=monday(addDays(TODAY,weekTableOffset*7));
   const days=weekTableWeekendMode?weekTableWeekendDays(ws):[0,1,2,3,4].map(i=>addDays(ws,i));
   const isWeekendView=weekTableWeekendMode;
@@ -1896,6 +1915,18 @@ async function weekTableDoBook(ds,therapist,time){
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
   const pid=wtSelectedPid;
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
+
+  // 3単位は60分連続で確保できる場合のみ登録可能。
+  if(isThreeUnits){
+    const t1=normTime;
+    const t2=normalizeTime(getSecondUnitTime(t1));
+    const t3=normalizeTime(getSecondUnitTime(t2));
+    const availableTimes=timesForDate(ds,therapist).map(normalizeTime);
+    if(!availableTimes.includes(t1)||!availableTimes.includes(t2)||!availableTimes.includes(t3)){
+      err.textContent=`3単位（60分）を登録するには、${t1}から60分連続した予約枠が必要です。`;
+      err.style.display='block';return;
+    }
+  }
 
   if(isOverDeadline(pid)){
     const ym=ds.substring(0,7);
