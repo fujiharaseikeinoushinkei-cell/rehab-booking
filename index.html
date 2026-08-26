@@ -1182,8 +1182,9 @@ async function loadAllData(){
   (pdRes.data||[]).forEach(p=>{
     patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
       disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
-      deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
+      deadline:(rehabBillingStartDates[String(p.id)]?parseLocalDate(calcRehabDeadline(rehabBillingStartDates[String(p.id)])):(p.deadline?new Date(p.deadline):new Date('2025-12-31'))),
       rehabStartDate:rehabStartDates[String(p.id)]||'',
+      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
   });
@@ -1270,13 +1271,14 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さん${reasonLabel}が使用中です。別の時間をお選びください。`};
   }
 
-  // 月6回チェック（期限切れ患者のみ）
+  // 算定期限超過後は、当月13単位を上限とする。
+  // DB上の予約を直接集計するため、過去データ取得範囲やローカルキャッシュに依存しない。
   if(isOverDeadline(pid)){
     const ym=date.substring(0,7);
-    const cnt=countMonthlyBookings(pid,ym);
-    if(cnt>=6){
-      const m=parseInt(ym.split('-')[1]);
-      return{ok:false,reason:`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`};
+    const usedUnits=await countMonthlyBookingUnits(pid,ym);
+    if(usedUnits+Number(unit||2)>13){
+      const m=parseInt(ym.split('-')[1],10);
+      return{ok:false,reason:`${m}月はリハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`};
     }
   }
 
@@ -1930,10 +1932,9 @@ async function weekTableDoBook(ds,therapist,time){
 
   if(isOverDeadline(pid)){
     const ym=ds.substring(0,7);
-    const cnt=countMonthlyBookings(pid,ym);
-    if(cnt>=6){
-      const m=parseInt(ym.split('-')[1]);
-      err.textContent=`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`;
+    const usedUnits=await countMonthlyBookingUnits(pid,ym);
+    if(usedUnits+unit>13){
+      err.textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
       err.style.display='block';return;
     }
   }
@@ -1959,8 +1960,8 @@ async function weekTableDoBook(ds,therapist,time){
       const nds=dateStr(nd);
       if(isTherapistOff(nds,therapist)||nd.getDay()===0)continue;
       if(isOverDeadline(pid)){
-        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
-        if(cnt>=6)break;
+        const usedUnits=await countMonthlyBookingUnits(pid,nds.substring(0,7));
+        if(usedUnits+2>13)break;
       }
       // DBから最新状態を確認して重複チェック
       if(!bookings[nds]?.[therapist]?.[normTime]){
@@ -2452,12 +2453,13 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
     return;
   }
 
-  // 期限切れ患者の月6回チェック
+  // 算定期限超過後は当月13単位まで。患者側予約でも同じ制限を適用する。
   if(isOverDeadline(currentPid)){
     const ym=fullDate.substring(0,7);
-    const cnt=countMonthlyBookings(currentPid,ym);
-    if(cnt>=6){
-      document.getElementById('res-err').textContent='制度上月6回しか予約できません';
+    const usedUnits=await countMonthlyBookingUnits(currentPid,ym);
+    const requestedUnit=2;
+    if(usedUnits+requestedUnit>13){
+      document.getElementById('res-err').textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
       document.getElementById('res-err').style.display='block';
       return;
     }
@@ -3120,20 +3122,23 @@ async function doExcelImport(){
 
 // ---- ADMIN BOOKING ----
 
-// 月間予約件数チェック（期限超過患者は月6回まで）
-function countMonthlyBookings(pid,yearMonth){
-  // yearMonth: "2025-07" 形式
-  let count=0;
-  Object.keys(bookings).forEach(date=>{
-    if(!date.startsWith(yearMonth))return;
-    staffList.forEach(s=>{
-      const th=s.id;
-      Object.entries(bookings[date][th]||{}).forEach(([t,bpid])=>{
-        if(bpid===pid && bookingStatuses[date]?.[th]?.[t]!=='cancelled') count++;
-      });
-    });
-  });
-  return count;
+// 月間予約単位数チェック（期限超過患者は月13単位まで）
+async function countMonthlyBookingUnits(pid,yearMonth){
+  // DBを直接集計し、ローカルの週間表キャッシュに依存しない。
+  const start=`${yearMonth}-01`;
+  const [y,m]=yearMonth.split('-').map(Number);
+  const end=dateStr(new Date(y,m,0));
+  const {data,error}=await sb.from('bookings')
+    .select('unit,status')
+    .eq('patient_id',pid)
+    .gte('booking_date',start)
+    .lte('booking_date',end);
+  if(error){
+    console.warn('月間単位数の取得に失敗しました',error);
+    // 通信失敗時は安全側に倒し、予約処理側で拒否できるよう十分大きな値を返す。
+    return 14;
+  }
+  return (data||[]).reduce((sum,b)=>b.status==='cancelled'?sum:sum+Number(b.unit||2),0);
 }
 
 function isOverDeadline(pid){
@@ -3188,7 +3193,7 @@ function loadBookingPatient(){
   renderBkSlots();
   document.getElementById('bk-slot-sec').style.display='block';
 }
-function renderBkSlots(){
+async function renderBkSlots(){
   const pid=document.getElementById('bk-pid').value;if(!pid)return;
   const p=patients[pid];
   const ws=monday(addDays(TODAY,bkWeekOffset*7));
@@ -3219,14 +3224,19 @@ function renderBkSlots(){
     return;
   }
   let html='';
+  const monthUnits={};
+  for(const {ds} of allSlots){
+    const ym=ds.substring(0,7);
+    if(isOverDeadline(pid) && monthUnits[ym]===undefined) monthUnits[ym]=await countMonthlyBookingUnits(pid,ym);
+  }
   allSlots.forEach(({ds,t,dow,d})=>{
     const key=`${ds}_${t}`;
     const ym=ds.substring(0,7);
-    const cnt=isOverDeadline(pid)?countMonthlyBookings(pid,ym):0;
-    const limitOver=isOverDeadline(pid)&&cnt>=6;
+    const usedUnits=isOverDeadline(pid)?(monthUnits[ym]||0):0;
+    const limitOver=isOverDeadline(pid)&&usedUnits>=13;
     html+=`<div class="slot ${limitOver?'full':'open'}" id="bks-${key}" 
-      onclick="${limitOver?`showToast('制度上月6回しか予約できません','#FF3B30')`:`selBkSlot('${ds}','${t}','${DAY_NAMES[dow]}','${d.getMonth()+1}/${d.getDate()}')`}">
-      ${DAY_NAMES[dow]}曜 ${d.getMonth()+1}/${d.getDate()} ${t}${limitOver?'　❌月6回上限':''}
+      onclick="${limitOver?`showToast('リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。','#FF3B30')`:`selBkSlot('${ds}','${t}','${DAY_NAMES[dow]}','${d.getMonth()+1}/${d.getDate()}')`}">
+      ${DAY_NAMES[dow]}曜 ${d.getMonth()+1}/${d.getDate()} ${t}${limitOver?'　❌月13単位上限':''}
     </div>`;
   });
   document.getElementById('bk-slots').innerHTML=html;
@@ -3243,12 +3253,13 @@ async function doAdminBooking(){
   if(!adminBookSelected){showToast('空き枠を選択してください');return;}
   const p=patients[pid];const{ds,time,day,date}=adminBookSelected;
 
-  // 期限切れ患者の月6回チェック
+  // 算定期限超過後は当月13単位まで。管理者予約でも同じ制限を適用する。
   if(isOverDeadline(pid)){
     const ym=ds.substring(0,7);
-    const cnt=countMonthlyBookings(pid,ym);
-    if(cnt>=6){
-      showToast('制度上月6回しか予約できません','#FF3B30');
+    const usedUnits=await countMonthlyBookingUnits(pid,ym);
+    const requestedUnit=2;
+    if(usedUnits+requestedUnit>13){
+      showToast(`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`,'#FF3B30');
       return;
     }
   }
@@ -3273,8 +3284,8 @@ async function doAdminBooking(){
       if(isTherapistOff(nds,p.therapist)||nd.getDay()===0)continue;
       // 期限切れ患者の月6回チェック
       if(isOverDeadline(pid)){
-        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
-        if(cnt>=6)break;
+        const usedUnits=await countMonthlyBookingUnits(pid,nds.substring(0,7));
+        if(usedUnits+2>13)break;
       }
       ensureBookingShape(nds);
       if(!bookings[nds][p.therapist][time]){
@@ -3449,8 +3460,8 @@ async function doPrevMonthReflect(prevYM,targetYM){
         if(isTherapistOff(ds,pat.therapist)){skipCount++;continue;}
         if(!isSlotAvailable(ds,pat.time,pat.therapist)){skipCount++;continue;}
         if(isOverDeadline(pid)){
-          const cnt=countMonthlyBookings(pid,targetYM);
-          if(cnt>=6){skipCount++;continue;}
+          const usedUnits=await countMonthlyBookingUnits(pid,targetYM);
+          if(usedUnits+2>13){skipCount++;continue;}
         }
         ensureBookingShape(ds);
         if(bookings[ds]?.[pat.therapist]?.[pat.time]){skipCount++;continue;}
