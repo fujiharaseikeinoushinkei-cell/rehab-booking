@@ -658,7 +658,24 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       </p>
       <div class="input-group"><label>臨時営業日</label><input type="date" id="sp-date"></div>
       <div class="input-group"><label>担当</label><select id="sp-th"></select></div>
-      <div class="input-group"><label>時間</label><input type="time" id="sp-time" value="9:10"></div>
+      <div class="input-group"><label>開始時間</label><input type="time" id="sp-time" value="09:10"></div>
+      <div class="input-group"><label>営業時間（20分＝1単位）</label>
+        <select id="sp-duration">
+          <option value="20">20分（1単位）</option>
+          <option value="40" selected>40分（2単位）</option>
+          <option value="60">60分（3単位）</option>
+          <option value="80">80分（4単位）</option>
+          <option value="100">100分（5単位）</option>
+          <option value="120">120分（6単位）</option>
+          <option value="140">140分（7単位）</option>
+          <option value="160">160分（8単位）</option>
+          <option value="180">180分（9単位）</option>
+          <option value="200">200分（10単位）</option>
+          <option value="220">220分（11単位）</option>
+          <option value="240">240分（12単位）</option>
+        </select>
+      </div>
+      <p style="font-size:11px;color:#8E8E93;margin-top:-4px;margin-bottom:10px;line-height:1.5">開始時間から指定した時間を臨時営業として登録します。単位は20分＝1単位です。既存予約と時間が重なる部分は予約できません。</p>
       <button class="btn btn-primary btn-block" onclick="addSpecialDay()">追加する</button>
       <p id="sp-err" style="font-size:13px;color:#FF3B30;margin-top:8px;display:none"></p>
     </div>
@@ -3751,20 +3768,46 @@ function renderSettingsDisplay(){
 
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
 // ---- 臨時営業日設定 ----
+function getSpecialDayGroups(){
+  const sorted=[...specialDays].sort((a,b)=>{
+    const d=a.special_date.localeCompare(b.special_date);
+    if(d!==0)return d;
+    const t=a.therapist.localeCompare(b.therapist);
+    if(t!==0)return t;
+    return timeMins(a.time_slot)-timeMins(b.time_slot);
+  });
+  const groups=[];
+  sorted.forEach(row=>{
+    const prev=groups[groups.length-1];
+    const rowMin=timeMins(row.time_slot);
+    if(prev&&prev.special_date===row.special_date&&prev.therapist===row.therapist&&prev.endMin===rowMin){
+      prev.rows.push(row);prev.endMin=rowMin+20;
+    }else{
+      groups.push({special_date:row.special_date,therapist:row.therapist,startMin:rowMin,endMin:rowMin+20,rows:[row]});
+    }
+  });
+  return groups;
+}
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
   if(!specialDays.length){el.innerHTML='<div class="empty">臨時営業日の登録はありません</div>';return;}
-  const sorted=[...specialDays].sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
-  el.innerHTML=sorted.map(s=>{
-    const d=parseLocalDate(s.special_date);
+  const groups=getSpecialDayGroups();
+  el.innerHTML=groups.map((g,idx)=>{
+    const d=parseLocalDate(g.special_date);
     const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const start=`${Math.floor(g.startMin/60)}:${String(g.startMin%60).padStart(2,'0')}`;
+    const end=`${Math.floor(g.endMin/60)}:${String(g.endMin%60).padStart(2,'0')}`;
+    const mins=g.endMin-g.startMin;
+    const units=Math.round(mins/20);
+    const ids=g.rows.map(r=>r.id).join(',');
     return `<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1">
-        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
-        <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
+        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${start}〜${end}</span>
+        <span class="chip" style="margin-left:6px;${staffChipStyle(g.therapist)}">${getStaffName(g.therapist)}</span>
+        <span style="font-size:11px;color:#8E8E93;margin-left:6px">${mins}分・${units}単位</span>
       </div>
-      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDayGroup('${ids}')">削除</button>
     </div>`;
   }).join('');
 }
@@ -3772,35 +3815,68 @@ async function addSpecialDay(){
   const ds=document.getElementById('sp-date').value;
   const th=document.getElementById('sp-th').value;
   const timeVal=document.getElementById('sp-time').value;
+  const duration=Number(document.getElementById('sp-duration').value||40);
   const err=document.getElementById('sp-err');
   err.style.display='none';
   if(!ds){err.textContent='日付を選択してください';err.style.display='block';return;}
-  if(!timeVal){err.textContent='時間を入力してください';err.style.display='block';return;}
-  const fmtTime=timeVal.split(':').map((v,i)=>i===0?parseInt(v):v).join(':');
-  const normTime=normalizeTime(fmtTime);
-  if(specialDays.some(s=>s.special_date===ds&&s.therapist===th&&normalizeTime(s.time_slot)===normTime)){
-    err.textContent='この臨時営業日・時間は既に登録されています';err.style.display='block';return;
+  if(!timeVal){err.textContent='開始時間を入力してください';err.style.display='block';return;}
+  if(!Number.isFinite(duration)||duration<20||duration%20!==0){err.textContent='営業時間は20分単位で選択してください';err.style.display='block';return;}
+  const [hh,mm]=timeVal.split(':').map(Number);
+  const startMin=hh*60+mm;
+  const segments=[];
+  for(let offset=0;offset<duration;offset+=20){
+    const seg=addMinutesToTime(timeVal,offset);
+    segments.push(normalizeTime(seg));
   }
-  const {data,error}=await sb.from('special_business_days').insert({special_date:ds,therapist:th,time_slot:fmtTime}).select().single();
+  // 既存の臨時営業・通常枠・予約と時間が重なる部分がある場合は登録しない。
+  const existingSpecial=getSpecialTimesForDay(ds,th);
+  if(segments.some(t=>existingSpecial.includes(t))){
+    err.textContent='指定した時間帯に既に臨時営業が登録されています。時間が重ならない範囲で登録してください';err.style.display='block';return;
+  }
+  const dow=parseLocalDate(ds).getDay();
+  const normalTimes=slotDefsForDay(dow,th);
+  // 通常枠が存在する時間を臨時営業として二重登録する必要はないため、重複を避ける。
+  if(segments.some(t=>normalTimes.includes(t))){
+    err.textContent='指定した時間帯に通常の予約枠が含まれています。時間が重ならない範囲で登録してください';err.style.display='block';return;
+  }
+  // 既存予約との時間重複を確認（予約がある部分を臨時営業に設定しない）。
+  const {data:bkRows,error:bkErr}=await sb.from('bookings').select('time_slot,status,unit').eq('booking_date',ds).eq('therapist',th);
+  if(bkErr){console.warn('臨時営業日の予約重複確認に失敗',bkErr);}
+  const activeRows=(bkRows||[]).filter(r=>['reserved','done','noshow'].includes(r.status));
+  const overlaps=activeRows.some(r=>{
+    const rs=timeMins(r.time_slot);const ru=Number(r.unit||2);const re=rs+(ru===3?60:(ru===1?20:40));
+    return segments.some(t=>{const ss=timeMins(t),se=ss+20;return ss<re&&rs<se;});
+  });
+  if(overlaps){err.textContent='指定した時間帯に既存の予約があります。予約と重ならない時間を登録してください';err.style.display='block';return;}
+  // special_business_days テーブルは既存の time_slot 形式を維持し、20分単位の各区間を1行ずつ保存する。
+  // これにより既存DBとの互換性を保ちながら、20〜240分の任意の臨時営業時間を正確に表現する。
+  const payload=segments.map(t=>({special_date:ds,therapist:th,time_slot:t}));
+  const {data,error}=await sb.from('special_business_days').insert(payload).select();
   if(error){
     console.error('臨時営業日の追加に失敗',error);
     err.textContent=`追加に失敗しました（${error.message||error.code||'不明'}）`;err.style.display='block';return;
   }
-  specialDays.push({...data,time_slot:normalizeTime(data.time_slot)});
+  (data||[]).forEach(row=>specialDays.push({...row,time_slot:normalizeTime(row.time_slot)}));
   renderSpecialDaysList();updateLastUpdated();
-  await dbLog('admin','add_special_day',`${ds} ${fmtTime} ${getStaffName(th)}`);
-  showToast('臨時営業日を追加しました','#34C759');
+  const endTime=normalizeTime(addMinutesToTime(timeVal,duration));
+  await dbLog('admin','add_special_day',`${ds} ${normalizeTime(timeVal)}〜${endTime} ${duration}分・${duration/20}単位 ${getStaffName(th)}`);
+  showToast(`臨時営業日を追加しました（${duration}分・${duration/20}単位）`,'#34C759');
   renderWeekTable();
 }
-async function deleteSpecialDay(id){
-  if(!confirm('この臨時営業日の設定を削除しますか？'))return;
-  const {error}=await sb.from('special_business_days').delete().eq('id',id);
+async function deleteSpecialDayGroup(idsText){
+  if(!confirm('この臨時営業時間の設定を削除しますか？'))return;
+  const ids=idsText.split(',').map(v=>Number(v)).filter(Number.isFinite);
+  if(!ids.length)return;
+  const {error}=await sb.from('special_business_days').delete().in('id',ids);
   if(error){showToast('削除に失敗しました');return;}
-  specialDays=specialDays.filter(s=>s.id!==id);
+  const idSet=new Set(ids);
+  specialDays=specialDays.filter(s=>!idSet.has(Number(s.id)));
   renderSpecialDaysList();updateLastUpdated();
   showToast('臨時営業日を削除しました');
   renderWeekTable();
 }
+// 旧データ互換：従来の1行削除呼び出しが残っていても動作するようにする
+async function deleteSpecialDay(id){ return deleteSpecialDayGroup(String(id)); }
 
 function renderTopLinks(){
   const el=document.getElementById('top-external-links');
