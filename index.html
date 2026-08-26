@@ -1280,18 +1280,26 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   const existing=rows.find(r=>r.time_slot===normTime);
   console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:rows.map(r=>({t:r.time_slot,s:r.status,u:r.unit}))});
 
-  // 3単位（60分）は開始枠＋後半20分＋次の20分の3枠を占有する。
-  // どこか1枠でも予約済み・実施済み・不在なら登録を拒否し、二重予約を防ぐ。
+  // 3単位（60分）は「20分刻みの3区間」を連続して占有する。
+  // 枠設定そのものは40分単位の開始枠で登録されているため、
+  // 8:30→8:50→9:10のように「中間の20分」がslotDefsに存在しないケースでも
+  // 正常に登録できるよう、開始時刻から60分の時間帯と既存予約の実時間が重なるかで判定する。
   if(unit===3){
-    const t1=normTime;
-    const t2=normalizeTime(getSecondUnitTime(t1));
-    const t3=normalizeTime(getSecondUnitTime(t2));
-    const occupied=rows.filter(r=>[t1,t2,t3].includes(r.time_slot) && (r.status==='reserved'||r.status==='noshow'||r.status==='done'));
+    const startMin=timeMins(normTime);
+    const endMin=startMin+60;
+    const occupied=rows.filter(r=>{
+      if(!['reserved','noshow','done'].includes(r.status))return false;
+      const rStart=timeMins(r.time_slot);
+      const rUnit=Number(r.unit||2);
+      const rEnd=rStart+(rUnit===3?60:(rUnit===1?20:40));
+      return startMin<rEnd && rStart<endMin;
+    });
     if(occupied.length){
       const hit=occupied[0];
       const existName=hit.patient_id&&patients[hit.patient_id]?patients[hit.patient_id].name:'別の患者';
       const reasonLabel=hit.status==='noshow'?'（来なかった扱い）':hit.status==='done'?'（実施済み）':'';
-      return{ok:false,reason:`3単位（60分）に必要な時間枠（${t1}〜${t3}）の一部が${existName}さん${reasonLabel}で使用中です。別の時間をお選びください。`};
+      const endTime=normalizeTime(addMinutesToTime(normTime,60));
+      return{ok:false,reason:`3単位（60分）に必要な時間帯（${normTime}〜${endTime}）の一部が${existName}さん${reasonLabel}で使用中です。別の時間をお選びください。`};
     }
   }else if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
     const existName=existing.patient_id&&patients[existing.patient_id]?patients[existing.patient_id].name:'別の患者';
@@ -2004,14 +2012,23 @@ async function weekTableDoBook(ds,therapist,time){
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
 
   // 3単位は60分連続で確保できる場合のみ登録可能。
+  // 予約枠の開始時刻は40分単位でも、実際の診療時間は20分刻みで連続しているため、
+  // 「8:30・8:50・9:10」の3つすべてがslotDefsに存在することは要求しない。
+  // 最終的な重複判定はdbBookSlotで、既存予約の実時間との重なりを確認する。
   if(isThreeUnits){
     const t1=normTime;
-    const t2=normalizeTime(getSecondUnitTime(t1));
-    const t3=normalizeTime(getSecondUnitTime(t2));
-    const availableTimes=timesForDate(ds,therapist).map(normalizeTime);
-    if(!availableTimes.includes(t1)||!availableTimes.includes(t2)||!availableTimes.includes(t3)){
-      err.textContent=`3単位（60分）を登録するには、${t1}から60分連続した予約枠が必要です。`;
+    const tEnd=normalizeTime(addMinutesToTime(t1,60));
+    if(!isSlotAvailable(ds,t1,therapist)){
+      err.textContent=`${t1}は現在予約できない時間帯です。別の時間をお選びください。`;
       err.style.display='block';return;
+    }
+    // 60分の途中で休診・PT休暇にかかる場合は登録不可。
+    for(const offset of [0,20,40]){
+      const seg=normalizeTime(addMinutesToTime(t1,offset));
+      if(!isSlotAvailable(ds,seg,therapist)){
+        err.textContent=`3単位（60分）を登録する時間帯（${t1}〜${tEnd}）に休診・休暇時間が含まれています。別の時間をお選びください。`;
+        err.style.display='block';return;
+      }
     }
   }
 
