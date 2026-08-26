@@ -1510,7 +1510,7 @@ function renderTodaySchedule(){
         const pid=bookings[ds]?.[th]?.[t];
         const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
         const empty=!pid;
-        html+=`<div class="sched-row" style="min-width:0;cursor:${empty?'pointer':'pointer'};" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">`
+        html+=`<div class="sched-row" style="min-width:0;cursor:${empty?'pointer':'pointer'};" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">
           <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
           <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
           ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
