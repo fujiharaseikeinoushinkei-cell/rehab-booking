@@ -1699,10 +1699,11 @@ async function renderWeekTable(){
     const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
-    html+=`<th colspan="${THERAPISTS.length}" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W}">
+    html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると担当者を選択して、その日の予約をすべて実施済にできます">
       <div style="font-weight:600">${dayLabel}</div>
       <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
       ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
+      <div style="font-size:8px;color:#2563EB;margin-top:2px">日付を押して一括実施済</div>
     </th>`;
   });
   html+=`</tr>`;
@@ -1794,6 +1795,61 @@ async function renderWeekTable(){
   el.innerHTML=html;
   const sumEl=document.getElementById('weektable-summary');
   if(sumEl)sumEl.innerHTML=isWeekendView?'<div style="font-size:11px;color:#8E8E93;margin-top:4px">※ 土曜日・日曜日に営業がある場合のみ表示しています。</div>':'';
+}
+
+function weekTableBulkDoneModal(ds){
+  const d=parseLocalDate(ds);
+  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const counts=staffList.map(s=>{
+    const statuses=bookingStatuses[ds]?.[s.id]||{};
+    const reserved=Object.values(statuses).filter(st=>st==='reserved').length;
+    const done=Object.values(statuses).filter(st=>st==='done').length;
+    return {id:s.id,name:s.name,reserved,done};
+  });
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">${m}月${day}日（${wd}）の一括実施済</div>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px;line-height:1.6">担当者を選択すると、その担当者の当日の「予約中」の予約をすべて実施済にします。すでに実施済・キャンセル・振替・来なかった予約は変更しません。</p>
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:14px">
+      ${counts.map(c=>`<button class="btn btn-green" onclick="weekTableBulkDone('${ds}','${c.id}')">${c.name}<span style="font-size:11px;margin-left:6px;opacity:.8">予約中 ${c.reserved}件${c.done?` ／ 実施済 ${c.done}件`:''}</span></button>`).join('')}
+    </div>
+    <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
+}
+async function weekTableBulkDone(ds,therapist){
+  const statuses=bookingStatuses[ds]?.[therapist]||{};
+  const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved').map(([t])=>normalizeTime(t));
+  if(!targetTimes.length){
+    showToast('実施済に変更する「予約中」の予約はありません');
+    return;
+  }
+  const ok=confirm(`${getStaffName(therapist)}の${ds}の予約をすべて実施済にしますか？\n対象：${targetTimes.length}件`);
+  if(!ok)return;
+  const {data,error}=await sb.from('bookings')
+    .update({status:'done'})
+    .eq('booking_date',ds)
+    .eq('therapist',therapist)
+    .eq('status','reserved')
+    .select('id,patient_id,time_slot,unit');
+  if(error){
+    console.error('一括実施済更新失敗',error);
+    showToast('一括更新に失敗しました。時間をおいて再度お試しください。');
+    return;
+  }
+  (data||[]).forEach(r=>{
+    const t=normalizeTime(r.time_slot);
+    if(!bookingStatuses[ds])bookingStatuses[ds]={};
+    if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={};
+    bookingStatuses[ds][therapist][t]='done';
+    if(!bookingUnits[ds])bookingUnits[ds]={};
+    if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={};
+    bookingUnits[ds][therapist][t]=r.unit||2;
+  });
+  await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「実施済」に変更【管理者】`,'admin');
+  closeModal();
+  await reloadBookings();
+  await renderWeekTable();
+  renderTodaySchedule();
+  renderNotifications();
+  showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件を実施済にしました`,'#34C759');
 }
 
 function weekTableBookModal(ds,therapist,time){
