@@ -1546,8 +1546,6 @@ function renderTodaySchedule(){
   const el=document.getElementById('today-schedule');
   if(!el)return;
   const ds=dateStr(TODAY);
-  const dow=TODAY.getDay();
-  const clinicClosed=isHoliday(ds)||dow===0;
   ensureBookingShape(ds);
 
   if(!staffList.length){
@@ -1558,9 +1556,7 @@ function renderTodaySchedule(){
   let html='<div style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch">';
   staffList.forEach(s=>{
     const th=s.id;
-    const specialOpen=hasSpecialBusinessDay(ds,th);
-    const closed=clinicClosed&&!specialOpen;
-    const times=closed?[]:timesForDate(ds,th).sort((a,b)=>{
+    const times=timesForDate(ds,th).sort((a,b)=>{
       const [ah,am]=a.split(':').map(Number);
       const [bh,bm]=b.split(':').map(Number);
       return (ah*60+am)-(bh*60+bm);
@@ -1569,21 +1565,35 @@ function renderTodaySchedule(){
     html+=`<div class="card" style="flex:1 0 250px;max-width:360px;padding:10px 12px;margin:0">
       <div style="font-size:14px;font-weight:700;padding:2px 2px 9px;margin-bottom:4px;border-bottom:1px solid #E5E5EA;white-space:nowrap">${s.name}</div>`;
 
-    if(closed){
-      html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:18px 4px">🔴 本日は休診日です</div>';
-    }else if(!times.length){
+    if(!times.length){
       html+='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:18px 4px">本日の予約枠はありません</div>';
     }else{
+      let visibleCount=0;
       times.forEach(t=>{
         const pid=bookings[ds]?.[th]?.[t];
         const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
         const empty=!pid;
-        html+=`<div class="sched-row" style="min-width:0;cursor:${empty?'pointer':'pointer'};" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">
+        const slotOff=!isSlotAvailable(ds,t,th);
+        if(slotOff){
+          const lv=isLeave(ds,th);
+          const lvFull=lv&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
+          const reason=lvFull?'休暇':(isDayOff(ds)||isHolidayPeriodOff(ds,t)||isAfternoonOff(ds,t)||isMorningOff(ds,t)?'休診':'休');
+          html+=`<div class="sched-row" style="min-width:0;opacity:.65;cursor:default" title="週間表と同じ休診・休暇設定を反映しています">
+            <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
+            <span class="sched-name" style="color:#9CA3AF;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${reason}</span>
+          </div>`;
+          return;
+        }
+        visibleCount++;
+        html+=`<div class="sched-row" style="min-width:0;cursor:pointer" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">
           <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
           <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
           ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
         </div>`;
       });
+      if(visibleCount===0){
+        html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:8px 4px">🔴 本日は予約可能な時間帯がありません</div>';
+      }
     }
     html+='</div>';
   });
