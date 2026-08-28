@@ -1130,20 +1130,23 @@ async function saveArchivedPatientIds(){
 }
 
 // ---- LOAD ----
-async function safeDbQuery(label, queryFactory){
-  try{
-    const res=await queryFactory();
-    if(res?.error){
-      console.error(`[DB] ${label}`,res.error);
-      loadErrors.push({label,error:res.error});
-      return {data:null,error:res.error};
+async function safeDbQuery(label, queryFactories){
+  const factories=Array.isArray(queryFactories)?queryFactories:[queryFactories];
+  let lastError=null;
+  for(let i=0;i<factories.length;i++){
+    try{
+      const res=await factories[i]();
+      if(!res?.error)return res;
+      lastError=res.error;
+      console.warn(`[DB] ${label} query${i+1} failed`,res.error);
+    }catch(e){
+      lastError=e;
+      console.warn(`[DB] ${label} query${i+1} exception`,e);
     }
-    return res;
-  }catch(e){
-    console.error(`[DB] ${label}`,e);
-    loadErrors.push({label,error:e});
-    return {data:null,error:e};
   }
+  console.error(`[DB] ${label} all queries failed`,lastError);
+  loadErrors.push({label,error:lastError});
+  return {data:null,error:lastError};
 }
 
 // ---- LOAD ----
@@ -1151,17 +1154,21 @@ async function loadAllData(){
   loadErrors=[];
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  // 1つのテーブル取得失敗でアプリ全体を停止させない。
-  // 特に special_business_days はDB側に旧スキーマが残っていても、他データを読めるようにする。
+  // DBの列構成が旧版/新版で異なっていても起動できるよう、初期読込は原則「*」で取得し、
+  // optionalな列（unit / period / operator / dismissed等）はJavaScript側で扱う。
+  // これによりSupabaseのschema cacheに存在しない列をselect条件に指定して全体が止まる問題を防ぐ。
   const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
-    safeDbQuery('system_settings',()=>sb.from('system_settings').select('*')),
-    safeDbQuery('slot_definitions',()=>sb.from('slot_definitions').select('*').eq('is_active',true)),
-    safeDbQuery('holidays',()=>sb.from('holidays').select('holiday_date,label,period')),
-    safeDbQuery('therapist_leaves',()=>sb.from('therapist_leaves').select('*')),
-    safeDbQuery('patients',()=>sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note')),
-    safeDbQuery('bookings',()=>sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to)),
-    safeDbQuery('notifications',()=>sb.from('notifications').select('id,message,created_at,operator').eq('dismissed',false).order('created_at',{ascending:false}).limit(40)),
-    safeDbQuery('special_business_days',()=>sb.from('special_business_days').select('id,special_date,therapist,time_slot'))
+    safeDbQuery('system_settings',[()=>sb.from('system_settings').select('*')]),
+    safeDbQuery('slot_definitions',[
+      ()=>sb.from('slot_definitions').select('*').eq('is_active',true),
+      ()=>sb.from('slot_definitions').select('*')
+    ]),
+    safeDbQuery('holidays',[()=>sb.from('holidays').select('*')]),
+    safeDbQuery('therapist_leaves',[()=>sb.from('therapist_leaves').select('*')]),
+    safeDbQuery('patients',[()=>sb.from('patients').select('*')]),
+    safeDbQuery('bookings',[()=>sb.from('bookings').select('*').gte('booking_date',from).lte('booking_date',to)]),
+    safeDbQuery('notifications',[()=>sb.from('notifications').select('*').order('created_at',{ascending:false}).limit(40)]),
+    safeDbQuery('special_business_days',[()=>sb.from('special_business_days').select('*')])
   ]);
 
   // settings
@@ -1208,21 +1215,24 @@ async function loadAllData(){
     }
   });
 
-  slotDefs=sdRes.data||[];
+  // slot_definitions：is_active列が無い旧DBでも取得結果を利用できるよう補正
+  slotDefs=(sdRes.data||[]).filter(s=>s.is_active===undefined||s.is_active===true);
   holidayData=hdRes.data||[];
   holidays=new Set(holidayData.filter(h=>(h.period||'full')==='full').map(h=>h.holiday_date));
   leaves={}; staffList.forEach(s=>leaves[s.id]=new Set()); leaveData=[];
-  (ldRes.data||[]).forEach(l=>{ if(!leaves[l.therapist])leaves[l.therapist]=new Set(); leaves[l.therapist].add(l.leave_date); leaveData.push(l); });
+  (ldRes.data||[]).forEach(l=>{ if(!leaves[l.therapist])leaves[l.therapist]=new Set(); if(l.leave_date)leaves[l.therapist].add(l.leave_date); leaveData.push(l); });
 
   patients={};
   (pdRes.data||[]).forEach(p=>{
-    patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
-      deadline:(rehabBillingStartDates[String(p.id)]?parseLocalDate(calcRehabDeadline(rehabBillingStartDates[String(p.id)])):(p.deadline?new Date(p.deadline):new Date('2025-12-31'))),
-      rehabStartDate:rehabStartDates[String(p.id)]||'',rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',careInsurance:!!careInsurancePatients[String(p.id)],note:p.note||'',history:[]};
+    const pid=String(p.id);
+    patients[p.id]={name:p.name||'',kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
+      deadline:(rehabBillingStartDates[pid]?parseLocalDate(calcRehabDeadline(rehabBillingStartDates[pid])):(p.deadline?new Date(p.deadline):new Date('2025-12-31'))),
+      rehabStartDate:rehabStartDates[pid]||'',rehabBillingStartDate:rehabBillingStartDates[pid]||'',careInsurance:!!careInsurancePatients[pid],note:p.note||'',history:[]};
   });
 
   bookings={};bookingStatuses={};bookingUnits={};
   (brRes.data||[]).forEach(b=>{
+    if(!b.booking_date||!b.therapist||!b.time_slot)return;
     if(!bookings[b.booking_date])bookings[b.booking_date]={};
     if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
     if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
@@ -1231,11 +1241,12 @@ async function loadAllData(){
     if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
     bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
-    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
-    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
+    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status||'reserved';
+    bookingUnits[b.booking_date][b.therapist][normSlot]=Number(b.unit||2);
   });
-  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
-  // 臨時営業はDBに存在する time_slot 行だけを扱う。
+  notifications=(ndRes.data||[])
+    .filter(n=>n.dismissed===undefined||n.dismissed===false)
+    .map(n=>({id:n.id,text:n.message||'',time:fmtTime(n.created_at),operator:n.operator||'patient'}));
   specialDays=(spRes.data||[]).map(s=>({...s,time_slot:normalizeTime(s.time_slot)}));
 
   if(loadErrors.length){
