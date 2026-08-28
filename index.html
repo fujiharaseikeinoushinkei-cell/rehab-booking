@@ -1161,7 +1161,7 @@ async function loadAllData(){
     safeDbQuery('patients',()=>sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note')),
     safeDbQuery('bookings',()=>sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to)),
     safeDbQuery('notifications',()=>sb.from('notifications').select('id,message,created_at,operator').eq('dismissed',false).order('created_at',{ascending:false}).limit(40)),
-    safeDbQuery('special_business_days',()=>sb.from('special_business_days').select('*'))
+    safeDbQuery('special_business_days',()=>sb.from('special_business_days').select('id,special_date,therapist,time_slot'))
   ]);
 
   // settings
@@ -4237,8 +4237,15 @@ function printActuals(){const old=document.title;document.title='リハビリ実
 // ---- INIT ----
 async function init(){
   const initErrors=[];
-  try{ await loadAllData(); }catch(e){ console.error('loadAllData error',e); initErrors.push({label:'初期データ',error:e}); }
-  try{ await ensureTentativePatients(); }catch(e){ console.error('ensureTentativePatients error',e); initErrors.push({label:'仮予約患者',error:e}); }
+  // 起動時にDBの一部取得失敗があっても、アプリ全体を停止させない。
+  try{ await loadAllData(); }catch(e){
+    console.error('loadAllData error',e);
+    initErrors.push({label:'初期データ',error:e});
+  }
+  try{ await ensureTentativePatients(); }catch(e){
+    console.error('ensureTentativePatients error',e);
+    initErrors.push({label:'仮予約患者',error:e});
+  }
   const renders=[
     ['トップ名称',()=>{const el=document.getElementById('top-clinic-name');if(el)el.textContent=clinicName;}],
     ['トップ案内',renderTopSubtitle],['お知らせ',renderReminder],['設定表示',renderSettingsDisplay],['外部リンク',renderTopLinks]
@@ -4246,17 +4253,30 @@ async function init(){
   for(const [label,fn] of renders){
     try{fn();}catch(e){console.error(`初期表示エラー: ${label}`,e);initErrors.push({label,error:e});}
   }
-  if(initErrors.length||loadErrors.length){
-    const all=[...loadErrors,...initErrors];
+  const all=[...loadErrors,...initErrors];
+  if(all.length){
+    const names=all.map(x=>x.label).filter(Boolean).join('、');
     console.warn('初期化中の一部エラー',all);
-    setTimeout(()=>{
-      const names=all.map(x=>x.label).filter(Boolean).join('、');
-      showToast(`一部データを読み込めませんでした（${names}）。画面は利用できます。`,'#B00020');
-    },300);
+    // alertは使用せず、画面を利用可能なまま具体的なエラーを表示する。
+    setTimeout(()=>showToast(`一部データを読み込めませんでした（${names}）。画面は利用できます。`,'#B00020'),300);
   }
   const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
   const app=document.getElementById('app'); if(app)app.style.display='block';
 }
+
+// Promise rejection / JavaScript error がDB読み込み画面を巻き込んで停止しないようにする。
+window.addEventListener('unhandledrejection',e=>{
+  console.error('Unhandled Promise rejection',e.reason);
+  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
+  const app=document.getElementById('app'); if(app)app.style.display='block';
+  setTimeout(()=>showToast(`処理中にエラーが発生しました。${String(e.reason?.message||'画面は利用できます。')}`,'#B00020'),100);
+});
+window.addEventListener('error',e=>{
+  console.error('Window error',e.error||e.message);
+  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
+  const app=document.getElementById('app'); if(app)app.style.display='block';
+});
+
 init();
 </script>
 </body>
