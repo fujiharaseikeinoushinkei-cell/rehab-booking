@@ -773,6 +773,7 @@ let pubTherapist=null;
 let pubTargetDate=null;
 let topCalYear=TODAY.getFullYear(),topCalMonth=TODAY.getMonth();
 let topCalBookings={};
+let loadErrors=[];
 let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
 
 // ---- スタッフ（担当PT）管理 ----
@@ -1009,34 +1010,20 @@ function slotDefsForDay(dow,therapist){
 }
 
 // ---- 臨時営業日 ----
-let specialDays=[]; // [{id,special_date,therapist,time_slot,duration_minutes?}]
+let specialDays=[]; // [{id,special_date,therapist,time_slot}]
 function getSpecialTimesForDay(ds,therapist){
   return specialDays
     .filter(s=>s.special_date===ds&&s.therapist===therapist)
     .map(s=>normalizeTime(s.time_slot))
     .filter((v,i,a)=>a.indexOf(v)===i);
 }
-function getSpecialWindowsForDay(ds,therapist){
-  const map=[];
-  specialDays.filter(s=>s.special_date===ds&&s.therapist===therapist).forEach(s=>{
-    const start=timeMins(s.time_slot);
-    const dur=Number(s.duration_minutes||20);
-    map.push({start,end:start+dur});
-  });
-  return map;
-}
 function isSpecialBusinessSlot(ds,therapist,time){
-  const t=timeMins(time);
-  return getSpecialWindowsForDay(ds,therapist).some(w=>t>=w.start&&t<w.end);
+  return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
 }
 function hasSpecialBusinessDay(ds,therapist){
-  return getSpecialWindowsForDay(ds,therapist).length>0;
+  return getSpecialTimesForDay(ds,therapist).length>0;
 }
-function isWithinSpecialBusinessWindow(ds,therapist,startTime,durationMin){
-  const start=timeMins(startTime), end=start+durationMin;
-  return getSpecialWindowsForDay(ds,therapist).some(w=>start>=w.start&&end<=w.end);
-}
-// 指定日の「枠設定」による通常の時間帯＋臨時営業日の時間帯を合算して返す
+// 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
 function timesForDate(ds,therapist){
   const dow=parseLocalDate(ds).getDay();
   const defined=slotDefsForDay(dow,therapist);
@@ -1128,8 +1115,9 @@ async function saveRehabBillingStartDates(){
 function calcRehabDeadline(startDate){
   if(!startDate)return '';
   const d=parseLocalDate(startDate);
+  if(Number.isNaN(d.getTime())) return '';
   d.setDate(d.getDate()+150);
-  return dateStr(d);
+  return window.dateStr(d);
 }
 async function saveRehabStartDates(){
   await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
@@ -1143,35 +1131,71 @@ async function saveArchivedPatientIds(){
 }
 
 // ---- LOAD ----
+async function safeDbQuery(label, queryFactories){
+  const factories=Array.isArray(queryFactories)?queryFactories:[queryFactories];
+  let lastError=null;
+  for(let i=0;i<factories.length;i++){
+    try{
+      const res=await factories[i]();
+      if(!res?.error)return res;
+      lastError=res.error;
+      console.warn(`[DB] ${label} query${i+1} failed`,res.error);
+    }catch(e){
+      lastError=e;
+      console.warn(`[DB] ${label} query${i+1} exception`,e);
+    }
+  }
+  console.error(`[DB] ${label} all queries failed`,lastError);
+  loadErrors.push({label,error:lastError});
+  return {data:null,error:lastError};
+}
+
+// ---- LOAD ----
 async function loadAllData(){
-  // 並列でまとめて取得（速度改善）
+  // 初期データは「1つのテーブルの失敗でloadAllData全体がthrowする」ことがないよう、
+  // テーブル単位で安全に取得する。DBの列名はselect('*')で取得し、任意列はJS側で補正する。
+  loadErrors=[];
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  const results=await Promise.all([
-    sb.from('system_settings').select('*'),
-    sb.from('slot_definitions').select('*').eq('is_active',true),
-    sb.from('holidays').select('holiday_date,label,period'),
-    sb.from('therapist_leaves').select('*'),
-    sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
-    sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
-      .gte('booking_date',from).lte('booking_date',to),
-    sb.from('notifications').select('id,message,created_at,operator')
-      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
-    sb.from('special_business_days').select('*'),
-  ].map(p=>p.then(r=>r).catch(error=>({data:null,error}))));
-  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=results;
-  const loadErrors=[];
-  [['設定',srRes],['枠設定',sdRes],['休診日',hdRes],['PT休暇',ldRes],['患者',pdRes],['予約',brRes],['お知らせ',ndRes],['臨時営業',spRes]].forEach(([name,res])=>{
-    if(res?.error)loadErrors.push(`${name}: ${res.error.message||res.error.code||'取得失敗'}`);
-  });
-  if(loadErrors.length){
-    console.error('データ読み込みエラー',loadErrors);
-    const el=document.getElementById('load-error');
-    if(el){el.style.display='block';el.innerHTML=`⚠️ 一部データを読み込めませんでした。<br>${loadErrors.join('<br>')}<br><button class="btn btn-sm" style="margin-top:8px" onclick="location.reload()">再読み込み</button>`;}
+  async function getRows(label, factory){
+    try{
+      const res=await factory();
+      if(res && !res.error){
+        return Array.isArray(res.data)?res.data:[];
+      }
+      const err=res?.error||new Error('データが返されませんでした');
+      console.error(`[DB] ${label} 取得失敗`,err);
+      loadErrors.push({label,error:err});
+      return [];
+    }catch(e){
+      console.error(`[DB] ${label} 取得例外`,e);
+      loadErrors.push({label,error:e});
+      return [];
+    }
   }
 
+  const [
+    settingsRows,
+    slotRows,
+    holidayRows,
+    leaveRows,
+    patientRows,
+    bookingRows,
+    notificationRows,
+    specialRows
+  ]=await Promise.all([
+    getRows('設定',()=>sb.from('system_settings').select('*')),
+    getRows('枠設定',()=>sb.from('slot_definitions').select('*')),
+    getRows('休診日',()=>sb.from('holidays').select('*')),
+    getRows('PT休暇',()=>sb.from('therapist_leaves').select('*')),
+    getRows('患者',()=>sb.from('patients').select('*')),
+    getRows('予約',()=>sb.from('bookings').select('*').gte('booking_date',from).lte('booking_date',to)),
+    getRows('お知らせ',()=>sb.from('notifications').select('*').limit(100)),
+    getRows('臨時営業日',()=>sb.from('special_business_days').select('*'))
+  ]);
+
   // settings
-  (srRes.data||[]).forEach(r=>{
+  settingsRows.forEach(r=>{
     if(r.key==='clinic_name')clinicName=r.value;
     if(r.key==='top_subtitle_text')topSubtitleText=r.value;
     if(r.key==='clinic_phone')clinicPhone=r.value;
@@ -1182,16 +1206,15 @@ async function loadAllData(){
     if(r.key==='reception_time_end')settings.tend=r.value;
     if(r.key==='business_hours_matrix'){
       try{
-        const parsed=JSON.parse(r.value);
-        // デフォルトとマージ（新しい曜日・週パターンが増えても欠損しないように）
-        businessHoursMatrix=Object.assign(defaultBusinessHoursMatrix(),parsed);
-      }catch(e){console.warn('営業時間設定の読み込みに失敗しました',e);}
+        const parsed=JSON.parse(r.value||'{}');
+        if(parsed&&typeof parsed==='object')businessHoursMatrix=Object.assign(defaultBusinessHoursMatrix(),parsed);
+      }catch(e){console.warn('営業時間設定の解析に失敗しました',e);}
     }
     if(r.key==='staff_list'){
       try{
-        const parsed=JSON.parse(r.value);
+        const parsed=JSON.parse(r.value||'[]');
         if(Array.isArray(parsed)&&parsed.length)staffList=parsed;
-      }catch(e){console.warn('スタッフ一覧の読み込みに失敗しました',e);}
+      }catch(e){console.warn('スタッフ一覧の解析に失敗しました',e);}
     }
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
@@ -1199,84 +1222,121 @@ async function loadAllData(){
       try{
         const parsed=JSON.parse(r.value||'[]');
         archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
-      }catch(e){ archivedPatientIds=new Set(); }
+      }catch(e){archivedPatientIds=new Set();}
     }
     if(r.key==='patient_rehab_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         rehabStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){ rehabStartDates={}; }
+      }catch(e){rehabStartDates={};}
     }
     if(r.key==='patient_care_insurance'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         careInsurancePatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){ careInsurancePatients={}; }
+      }catch(e){careInsurancePatients={};}
     }
     if(r.key==='patient_rehab_billing_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         rehabBillingStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){ rehabBillingStartDates={}; }
+      }catch(e){rehabBillingStartDates={};}
     }
-    if(r.key==='last_updated'){
+    if(r.key==='last_updated'&&r.value){
       try{
         const d=new Date(r.value);
-        document.getElementById('last-updated-footer').textContent=
-          d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+
-          d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 更新';
+        if(!Number.isNaN(d.getTime())){
+          const el=document.getElementById('last-updated-footer');
+          if(el)el.textContent=d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 更新';
+        }
       }catch(e){}
     }
   });
 
-  // slot definitions
-  slotDefs=sdRes?.data||[];
-
-  // holidays
-  holidayData=hdRes?.data||[];
+  // DBの実際の行をJSの既存構造へ変換
+  slotDefs=slotRows.filter(s=>s.is_active===undefined||s.is_active===true);
+  holidayData=holidayRows.filter(h=>h&&h.holiday_date);
   holidays=new Set(holidayData.filter(h=>(h.period||'full')==='full').map(h=>h.holiday_date));
 
-  // therapist leaves
   leaves={};
-  staffList.forEach(s=>leaves[s.id]=new Set());
+  staffList.forEach(st=>{leaves[st.id]=new Set();});
   leaveData=[];
-  (ldRes.data||[]).forEach(l=>{
+  leaveRows.forEach(l=>{
+    if(!l||!l.therapist||!l.leave_date)return;
     if(!leaves[l.therapist])leaves[l.therapist]=new Set();
     leaves[l.therapist].add(l.leave_date);
     leaveData.push(l);
   });
 
-  // patients
   patients={};
-  (pdRes?.data||[]).forEach(p=>{
-    patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
-      disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
-      deadline:(rehabBillingStartDates[String(p.id)]?parseLocalDate(calcRehabDeadline(rehabBillingStartDates[String(p.id)])):(p.deadline?new Date(p.deadline):new Date('2025-12-31'))),
-      rehabStartDate:rehabStartDates[String(p.id)]||'',
-      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
-      careInsurance:!!careInsurancePatients[String(p.id)],
-      note:p.note||'',history:[]};
+  patientRows.forEach(p=>{
+    if(!p||p.id==null)return;
+    const pid=String(p.id);
+    let deadline;
+    if(rehabBillingStartDates[pid]){
+      const ds=calcRehabDeadline(rehabBillingStartDates[pid]);
+      deadline=ds?parseLocalDate(ds):new Date('2025-12-31');
+    }else if(p.deadline){
+      const pd=new Date(p.deadline);
+      deadline=Number.isNaN(pd.getTime())?new Date('2025-12-31'):pd;
+    }else{
+      deadline=new Date('2025-12-31');
+    }
+    patients[pid]={
+      name:p.name||'',
+      kana:p.kana||'',
+      dob:p.dob||'',
+      gender:p.gender||'男',
+      disease:p.disease||'',
+      therapist:p.therapist||(staffList[0]?.id||''),
+      deadline,
+      rehabStartDate:rehabStartDates[pid]||'',
+      rehabBillingStartDate:rehabBillingStartDates[pid]||'',
+      careInsurance:!!careInsurancePatients[pid],
+      note:p.note||'',
+      history:[]
+    };
   });
 
-  // bookings
   bookings={};bookingStatuses={};bookingUnits={};
-  (brRes?.data||[]).forEach(b=>{
-    if(!bookings[b.booking_date])bookings[b.booking_date]={};
-    if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
-    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
-    if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
-    if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
-    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
-    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
-    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
-    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
+  bookingRows.forEach(b=>{
+    if(!b||!b.booking_date||!b.therapist||!b.time_slot)return;
+    const ds=b.booking_date,th=b.therapist,t=normalizeTime(b.time_slot);
+    if(!bookings[ds])bookings[ds]={};
+    if(!bookingStatuses[ds])bookingStatuses[ds]={};
+    if(!bookingUnits[ds])bookingUnits[ds]={};
+    if(!bookings[ds][th])bookings[ds][th]={};
+    if(!bookingStatuses[ds][th])bookingStatuses[ds][th]={};
+    if(!bookingUnits[ds][th])bookingUnits[ds][th]={};
+    bookings[ds][th][t]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    bookingStatuses[ds][th][t]=b.status||'reserved';
+    bookingUnits[ds][th][t]=Number(b.unit||2);
   });
 
-  // notifications
-  notifications=(ndRes?.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
+  notifications=notificationRows
+    .filter(n=>n && (n.dismissed===undefined||n.dismissed===false))
+    .sort((a,b)=>{
+      const ta=a.created_at?new Date(a.created_at).getTime():0;
+      const tb=b.created_at?new Date(b.created_at).getTime():0;
+      return tb-ta;
+    })
+    .slice(0,40)
+    .map(n=>({
+      id:n.id,
+      text:n.message||'',
+      time:fmtTime(n.created_at),
+      operator:n.operator||'patient'
+    }));
 
-  // 臨時営業日
-  specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot),duration_minutes:Number(s.duration_minutes||20)})):[];
+  specialDays=specialRows
+    .filter(s=>s&&s.special_date&&s.time_slot)
+    .map(s=>({...s,time_slot:normalizeTime(s.time_slot)}));
+
+  // 取得失敗がある場合でも、ここではthrowしない。
+  // アプリは起動し、失敗したテーブルだけ後から再読込できる。
+  if(loadErrors.length){
+    console.warn('初期データ取得失敗:',loadErrors.map(x=>x.label));
+  }
 }
 
 function fmtTime(iso){
@@ -1321,19 +1381,7 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   const existing=rows.find(r=>r.time_slot===normTime);
   console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:rows.map(r=>({t:r.time_slot,s:r.status,u:r.unit}))});
 
-  // 3単位（60分）以上の予約は、臨時営業として登録された連続営業時間内なら許可する。
-  // 「開始から40分まで」などの固定制限は設けず、営業時間の範囲と既存予約との時間重複だけで判定する。
-  const requestedDuration=Math.max(20, Number(unit||2)*20);
-  if(hasSpecialBusinessDay(date,therapist) && !isWithinSpecialBusinessWindow(date,therapist,normTime,requestedDuration)){
-    const windows=getSpecialWindowsForDay(date,therapist);
-    const insideNormal=slotDefsForDay(parseLocalDate(date).getDay(),therapist).includes(normTime);
-    if(!insideNormal){
-      return{ok:false,reason:`臨時営業として登録された時間帯（${normTime}〜${normalizeTime(addMinutesToTime(normTime,requestedDuration))}）を超えるため予約できません。別の時間をお選びください。`};
-    }
-  }
-
-  // 3単位（60分）は「開始時刻から60分」の実時間で重複判定する。
-  // 枠設定の中間20分が存在するかどうかでは判定しない。
+  // 3単位（60分）は「20分刻みの3区間」を連続して占有する。
   // 枠設定そのものは40分単位の開始枠で登録されているため、
   // 8:30→8:50→9:10のように「中間の20分」がslotDefsに存在しないケースでも
   // 正常に登録できるよう、開始時刻から60分の時間帯と既存予約の実時間が重なるかで判定する。
@@ -1458,25 +1506,29 @@ async function resolvePatientName(pid){
 // bookingsのみ再読み込み（キャッシュ更新）
 async function reloadBookings(){
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
-  const {data:br}=await sb.from('bookings')
-    .select('booking_date,time_slot,therapist,patient_id,status,unit')
-    .gte('booking_date',from).lte('booking_date',to);
-  bookings={};bookingStatuses={};bookingUnits={};
+  const {data:br,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to);
+  if(error){
+    console.error('bookingsリロード失敗',error);
+    showToast('予約データの更新に失敗しました。現在の表示を保持します。','#B00020');
+    return false;
+  }
+  const nextBookings={},nextStatuses={},nextUnits={};
   (br||[]).forEach(b=>{
-    if(!bookings[b.booking_date])bookings[b.booking_date]={};
-    if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
-    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
-    if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
-    if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
-    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
+    if(!nextBookings[b.booking_date])nextBookings[b.booking_date]={};
+    if(!nextStatuses[b.booking_date])nextStatuses[b.booking_date]={};
+    if(!nextUnits[b.booking_date])nextUnits[b.booking_date]={};
+    if(!nextBookings[b.booking_date][b.therapist])nextBookings[b.booking_date][b.therapist]={};
+    if(!nextStatuses[b.booking_date][b.therapist])nextStatuses[b.booking_date][b.therapist]={};
+    if(!nextUnits[b.booking_date][b.therapist])nextUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
-    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
-    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
-    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
+    nextBookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    nextStatuses[b.booking_date][b.therapist][normSlot]=b.status;
+    nextUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
+  bookings=nextBookings;bookingStatuses=nextStatuses;bookingUnits=nextUnits;
   console.log('bookingsリロード完了',bookings);
+  return true;
 }
-
 
 async function dbAddNotification(text,operator='system'){
   const {data,error}=await sb.from('notifications').insert({message:text,operator}).select().single();
@@ -2748,25 +2800,25 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
 
 
 // ---- ADMIN ----
-function adminLogin(){
+// 初期DB読み込み完了前のログインによる「本日の予定」空表示を防止
+let appDataReady=null;
+async function adminLogin(){
   const pw=document.getElementById('admin-pw').value;
-  if(pw===ADMIN_PW){
-    document.getElementById('admin-err').style.display='none';
-    document.getElementById('admin-pw').value='';
-    const now=new Date();
-    document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
-    renderNotifications();renderDeadline();renderSettingsDisplay();
-    renderTodaySchedule();
-    weekTableOffset=0;
-    weekTableWeekendMode=false;
-    populateClinicSettingsInputs();
-    document.getElementById('s-start').value=settings.start;
-    document.getElementById('s-end').value=settings.end;
-    document.getElementById('s-tstart').value=settings.tstart;
-    document.getElementById('s-tend').value=settings.tend;
-    showScreen('s-admin');
-    dbLog('admin','login','管理者ログイン');
-  } else {document.getElementById('admin-err').style.display='block';}
+  if(pw!==ADMIN_PW){document.getElementById('admin-err').style.display='block';return;}
+  document.getElementById('admin-err').style.display='none';
+  document.getElementById('admin-pw').value='';
+  if(appDataReady){try{await appDataReady;}catch(e){console.error('初期データ待機エラー',e);}}
+  const now=new Date();
+  document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
+  weekTableOffset=0; weekTableWeekendMode=false;
+  populateClinicSettingsInputs();
+  document.getElementById('s-start').value=settings.start;
+  document.getElementById('s-end').value=settings.end;
+  document.getElementById('s-tstart').value=settings.tstart;
+  document.getElementById('s-tend').value=settings.tend;
+  showScreen('s-admin');
+  renderNotifications(); renderDeadline(); renderSettingsDisplay(); renderTodaySchedule();
+  dbLog('admin','login','管理者ログイン');
 }
 
 let notifShowCount={patient:5,admin:5};
@@ -3896,13 +3948,13 @@ async function addSpecialDay(){
   if(overlaps){err.textContent='指定した時間帯に既存の予約があります。予約と重ならない時間を登録してください';err.style.display='block';return;}
   // special_business_days テーブルは既存の time_slot 形式を維持し、20分単位の各区間を1行ずつ保存する。
   // これにより既存DBとの互換性を保ちながら、20〜240分の任意の臨時営業時間を正確に表現する。
-  const payload=segments.map((t,i)=>({special_date:ds,therapist:th,time_slot:t,duration_minutes:i===0?duration:20}));
+  const payload=segments.map(t=>({special_date:ds,therapist:th,time_slot:t}));
   const {data,error}=await sb.from('special_business_days').insert(payload).select();
   if(error){
     console.error('臨時営業日の追加に失敗',error);
     err.textContent=`追加に失敗しました（${error.message||error.code||'不明'}）`;err.style.display='block';return;
   }
-  (data||[]).forEach(row=>specialDays.push({...row,time_slot:normalizeTime(row.time_slot),duration_minutes:Number(row.duration_minutes||20)}));
+  (data||[]).forEach(row=>specialDays.push({...row,time_slot:normalizeTime(row.time_slot)}));
   renderSpecialDaysList();updateLastUpdated();
   const endTime=normalizeTime(addMinutesToTime(timeVal,duration));
   await dbLog('admin','add_special_day',`${ds} ${normalizeTime(timeVal)}〜${endTime} ${duration}分・${duration/20}単位 ${getStaffName(th)}`);
@@ -4279,23 +4331,86 @@ function printActuals(){const old=document.title;document.title='リハビリ実
 
 // ---- INIT ----
 async function init(){
+  const initErrors=[];
+
   try{
     await loadAllData();
-    await ensureTentativePatients();
-    document.getElementById('top-clinic-name').textContent=clinicName;
-    renderTopSubtitle();
-    renderReminder();
-    renderSettingsDisplay();
-    renderTopLinks();
   }catch(e){
-    console.error('init error',e);
-    alert('データの読み込みに失敗しました。\nインターネット接続を確認してページを再読み込みしてください。');
-  }finally{
-    document.getElementById('loading-overlay').style.display='none';
-    document.getElementById('app').style.display='block';
+    // loadAllDataは通常throwしないが、予期しない処理エラーは記録する。
+    console.error('初期データ処理エラー',e);
+    initErrors.push({label:'初期処理',error:e});
+  }
+
+  try{
+    await ensureTentativePatients();
+  }catch(e){
+    console.error('仮予約患者の初期化失敗',e);
+    initErrors.push({label:'仮予約患者',error:e});
+  }
+
+  const renders=[
+    ['トップ名称',()=>{const el=document.getElementById('top-clinic-name');if(el)el.textContent=clinicName;}],
+    ['トップ案内',renderTopSubtitle],
+    ['お知らせ',renderReminder],
+    ['設定表示',renderSettingsDisplay],
+    ['外部リンク',renderTopLinks]
+  ];
+
+  for(const [label,fn] of renders){
+    try{fn();}catch(e){
+      console.error(`初期表示エラー: ${label}`,e);
+      initErrors.push({label,error:e});
+    }
+  }
+
+  const all=[...loadErrors,...initErrors];
+  if(all.length){
+    const names=all.map(x=>x.label).filter(Boolean).join('、');
+    console.warn('初期化中のエラー',all);
+    setTimeout(()=>{
+      showToast(`取得できなかった項目：${names}。画面は利用できます。`,'#B00020');
+    },300);
+  }
+
+  const overlay=document.getElementById('loading-overlay');
+  if(overlay)overlay.style.display='none';
+  const app=document.getElementById('app');
+  if(app)app.style.display='block';
+}
+
+// 初期データ再読み込み
+async function retryInitialDataLoad(){
+  const btn=document.getElementById('initial-reload-btn');
+  if(btn){btn.disabled=true;btn.textContent='再読み込み中...';}
+  await loadAllData();
+  renderReminder();
+  renderTopSubtitle();
+  renderSettingsDisplay();
+  renderTopLinks();
+  renderTodaySchedule();
+  if(btn){btn.disabled=false;btn.textContent='データを再読み込み';}
+  if(loadErrors.length){
+    showToast(`取得できなかった項目：${loadErrors.map(x=>x.label).join('、')}`,'#B00020');
+  }else{
+    showToast('データを再読み込みしました','#34C759');
   }
 }
-init();
+
+// Promise rejection / JavaScript error がDB読み込み画面を巻き込んで停止しないようにする。
+window.addEventListener('unhandledrejection',e=>{
+  console.error('Unhandled Promise rejection',e.reason);
+  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
+  const app=document.getElementById('app'); if(app)app.style.display='block';
+  setTimeout(()=>showToast(`処理中にエラーが発生しました。${String(e.reason?.message||'画面は利用できます。')}`,'#B00020'),100);
+});
+window.addEventListener('error',e=>{
+  console.error('Window error',e.error||e.message);
+  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
+  const app=document.getElementById('app'); if(app)app.style.display='block';
+});
+
+// 初期化Promiseを保持し、管理者ログインから待機できるようにする。
+appDataReady=init();
 </script>
 </body>
 </html>
