@@ -996,19 +996,46 @@ function slotDefsForDay(dow,therapist){
 
 // ---- 臨時営業日 ----
 let specialDays=[]; // [{id,special_date,therapist,time_slot}]
+function getSpecialBusinessWindows(ds,therapist){
+  const rows=specialDays
+    .filter(s=>s.special_date===ds&&s.therapist===therapist&&s.time_slot)
+    .map(s=>({...s,time_slot:normalizeTime(s.time_slot)}))
+    .sort((a,b)=>timeMins(a.time_slot)-timeMins(b.time_slot));
+  const groups=[];
+  rows.forEach(row=>{
+    const m=timeMins(row.time_slot);
+    const prev=groups[groups.length-1];
+    if(prev && prev.endMin===m){
+      prev.rows.push(row); prev.endMin=m+20;
+    }else{
+      groups.push({startMin:m,endMin:m+20,rows:[row]});
+    }
+  });
+  return groups.map(g=>({
+    start:addMinutesToTime('00:00',g.startMin),
+    end:addMinutesToTime('00:00',g.endMin),
+    startMin:g.startMin,endMin:g.endMin,
+    duration:g.endMin-g.startMin,
+    units:Math.round((g.endMin-g.startMin)/20),
+    rows:g.rows
+  }));
+}
+function getSpecialBusinessWindow(ds,therapist,time){
+  const nt=normalizeTime(time);
+  return getSpecialBusinessWindows(ds,therapist).find(w=>w.start===nt)||null;
+}
+// 臨時営業は「登録された開始時刻だけ」を予約開始枠として表示する。
+// 終了時刻までの20分区間は営業時間の範囲を表すだけで、個別の予約開始枠にはしない。
 function getSpecialTimesForDay(ds,therapist){
-  return specialDays
-    .filter(s=>s.special_date===ds&&s.therapist===therapist)
-    .map(s=>normalizeTime(s.time_slot))
-    .filter((v,i,a)=>a.indexOf(v)===i);
+  return getSpecialBusinessWindows(ds,therapist).map(w=>w.start);
 }
 function isSpecialBusinessSlot(ds,therapist,time){
-  return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
+  return !!getSpecialBusinessWindow(ds,therapist,time);
 }
 function hasSpecialBusinessDay(ds,therapist){
-  return getSpecialTimesForDay(ds,therapist).length>0;
+  return getSpecialBusinessWindows(ds,therapist).length>0;
 }
-// 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
+// 指定日の「枠設定」による通常の時間帯＋臨時営業日の「開始時刻」だけを合算して返す
 function timesForDate(ds,therapist){
   const dow=parseLocalDate(ds).getDay();
   const defined=slotDefsForDay(dow,therapist);
@@ -1377,7 +1404,7 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
       if(!['reserved','noshow','done'].includes(r.status))return false;
       const rStart=timeMins(r.time_slot);
       const rUnit=Number(r.unit||2);
-      const rEnd=rStart+(rUnit===3?60:(rUnit===1?20:40));
+      const rEnd=rStart+(Math.max(1,rUnit)*20);
       return startMin<rEnd && rStart<endMin;
     });
     if(occupied.length){
@@ -2019,13 +2046,13 @@ function weekTableBookModal(ds,therapist,time){
     <div class="input-group" style="margin-top:4px">
       <label>🔁 登録方法</label>
       <select id="wt-auto">
-        <option value="">今回のみ（${time}に登録）</option>
+        ${getSpecialBusinessWindow(ds,therapist,time)?`<option value="special_units">臨時営業（${getSpecialBusinessWindow(ds,therapist,time).duration}分・${getSpecialBusinessWindow(ds,therapist,time).units}単位）</option>`:`<option value="">今回のみ（${time}に登録）</option>
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
         ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
         ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
-        <option value="three_units">3単位（60分）</option>
+        <option value="three_units">3単位（60分）</option>`}
       </select>
-      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位」は20分、「2単位」は40分、「3単位」は60分です。3単位登録では1件の予約を3単位として登録します。</p>
+      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">臨時営業日は登録した開始時刻だけが予約開始枠です。開始〜終了時間の長さから単位数を自動計算します。</p>
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -2100,13 +2127,15 @@ async function weekTableDoBook(ds,therapist,time){
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
   const auto=document.getElementById('wt-auto').value;
+  const specialWindow=getSpecialBusinessWindow(ds,therapist,time);
   // 「1単位」を選んだ場合は、実際に登録する時間を選択に応じて前半／後半に切り替える
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
   const isHalf=auto==='half_1'||auto==='half_2';
   const isThreeUnits=auto==='three_units';
-  const actualTime=auto==='half_1'?baseTime:auto==='half_2'?secondTime:(isThreeUnits?baseTime:time);
-  const unit=isHalf?1:(isThreeUnits?3:2);
+  const isSpecialUnits=auto==='special_units';
+  const actualTime=isSpecialUnits?(specialWindow?.start||time):auto==='half_1'?baseTime:auto==='half_2'?secondTime:(isThreeUnits?baseTime:time);
+  const unit=isSpecialUnits?Number(specialWindow?.units||0):(isHalf?1:(isThreeUnits?3:2));
   const normTime=normalizeTime(actualTime);
 
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
@@ -2117,14 +2146,23 @@ async function weekTableDoBook(ds,therapist,time){
   // 予約枠の開始時刻は40分単位でも、実際の診療時間は20分刻みで連続しているため、
   // 「8:30・8:50・9:10」の3つすべてがslotDefsに存在することは要求しない。
   // 最終的な重複判定はdbBookSlotで、既存予約の実時間との重なりを確認する。
-  if(isThreeUnits){
+  if(isSpecialUnits){
+    if(!specialWindow || specialWindow.start!==normTime){
+      err.textContent='臨時営業の予約開始枠が確認できません。別の時間をお選びください。';
+      err.style.display='block';return;
+    }
+    if(!isSlotAvailable(ds,normTime,therapist)){
+      err.textContent=`${normTime}は現在予約できない時間帯です。別の時間をお選びください。`;
+      err.style.display='block';return;
+    }
+  }else if(isThreeUnits){
     const t1=normTime;
     const tEnd=normalizeTime(addMinutesToTime(t1,60));
     if(!isSlotAvailable(ds,t1,therapist)){
       err.textContent=`${t1}は現在予約できない時間帯です。別の時間をお選びください。`;
       err.style.display='block';return;
     }
-    // 60分の途中で休診・PT休暇にかかる場合は登録不可。
+    // 通常営業の3単位だけ、60分全体の休診・休暇を確認する。
     for(const offset of [0,20,40]){
       const seg=normalizeTime(addMinutesToTime(t1,offset));
       if(!isSlotAvailable(ds,seg,therapist)){
@@ -2762,11 +2800,14 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
     return;
   }
 
+  // 臨時営業日は開始時刻だけを予約開始枠とし、営業時間から単位数を自動決定する。
+  const specialWindow=getSpecialBusinessWindow(fullDate,therapist,time);
+  const requestedUnit=specialWindow?Number(specialWindow.units||1):2;
+
   // 算定期限超過後は当月13単位まで。患者側予約でも同じ制限を適用する。
   if(isOverDeadline(currentPid)){
     const ym=fullDate.substring(0,7);
     const usedUnits=await countMonthlyBookingUnits(currentPid,ym);
-    const requestedUnit=2;
     if(usedUnits+requestedUnit>13){
       document.getElementById('res-err').textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
       document.getElementById('res-err').style.display='block';
@@ -2775,7 +2816,7 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   }
 
   btn.disabled=true;btn.textContent='処理中...';
-  const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid);
+  const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid,requestedUnit);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
   await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,currentPid);
