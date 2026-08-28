@@ -657,25 +657,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         本来休診の日（日曜・第1/3週の木土など）でも、特定の日付・担当・時間だけ臨時で営業させたい場合に登録します。登録した時間は、週間表・患者予約画面などで通常の枠と同じように予約できるようになります。
       </p>
       <div class="input-group"><label>臨時営業日</label><input type="date" id="sp-date"></div>
-      <div class="input-group"><label>担当</label><select id="sp-th"></select></div>
-      <div class="input-group"><label>開始時間</label><input type="time" id="sp-time" value="09:10"></div>
-      <div class="input-group"><label>営業時間（20分＝1単位）</label>
-        <select id="sp-duration">
-          <option value="20">20分（1単位）</option>
-          <option value="40" selected>40分（2単位）</option>
-          <option value="60">60分（3単位）</option>
-          <option value="80">80分（4単位）</option>
-          <option value="100">100分（5単位）</option>
-          <option value="120">120分（6単位）</option>
-          <option value="140">140分（7単位）</option>
-          <option value="160">160分（8単位）</option>
-          <option value="180">180分（9単位）</option>
-          <option value="200">200分（10単位）</option>
-          <option value="220">220分（11単位）</option>
-          <option value="240">240分（12単位）</option>
-        </select>
-      </div>
-      <p style="font-size:11px;color:#8E8E93;margin-top:-4px;margin-bottom:10px;line-height:1.5">開始時間から指定した時間を臨時営業として登録します。単位は20分＝1単位です。既存予約と時間が重なる部分は予約できません。</p>
+      <div class="input-group"><label>担当者</label><select id="sp-th"></select></div>
+      <div class="input-group"><label>開始時間</label><input type="time" id="sp-time" value="09:00" step="1200"></div>
+      <div class="input-group"><label>終了時間</label><input type="time" id="sp-end-time" value="09:40" step="1200"></div>
+      <p style="font-size:11px;color:#8E8E93;margin-top:-4px;margin-bottom:10px;line-height:1.5">開始時間〜終了時間を臨時営業として登録します。時間は20分単位で設定し、20分＝1単位として処理します。例：16:00〜17:00＝60分・3単位。既存予約と時間が重なる部分は登録できません。</p>
       <button class="btn btn-primary btn-block" onclick="addSpecialDay()">追加する</button>
       <p id="sp-err" style="font-size:13px;color:#FF3B30;margin-top:8px;display:none"></p>
     </div>
@@ -3913,14 +3898,18 @@ async function addSpecialDay(){
   const ds=document.getElementById('sp-date').value;
   const th=document.getElementById('sp-th').value;
   const timeVal=document.getElementById('sp-time').value;
-  const duration=Number(document.getElementById('sp-duration').value||40);
+  const endTimeVal=document.getElementById('sp-end-time').value;
   const err=document.getElementById('sp-err');
   err.style.display='none';
   if(!ds){err.textContent='日付を選択してください';err.style.display='block';return;}
-  if(!timeVal){err.textContent='開始時間を入力してください';err.style.display='block';return;}
-  if(!Number.isFinite(duration)||duration<20||duration%20!==0){err.textContent='営業時間は20分単位で選択してください';err.style.display='block';return;}
-  const [hh,mm]=timeVal.split(':').map(Number);
-  const startMin=hh*60+mm;
+  if(!timeVal){err.textContent='開始時間を選択してください';err.style.display='block';return;}
+  if(!endTimeVal){err.textContent='終了時間を選択してください';err.style.display='block';return;}
+  const startMin=timeMins(timeVal);
+  const endMin=timeMins(endTimeVal);
+  const duration=endMin-startMin;
+  if(duration<=0){err.textContent='終了時間は開始時間より後に設定してください';err.style.display='block';return;}
+  if(startMin%20!==0||endMin%20!==0){err.textContent='開始時間・終了時間は20分単位で設定してください';err.style.display='block';return;}
+  if(duration%20!==0){err.textContent='開始時間〜終了時間は20分単位で設定してください';err.style.display='block';return;}
   const segments=[];
   for(let offset=0;offset<duration;offset+=20){
     const seg=addMinutesToTime(timeVal,offset);
