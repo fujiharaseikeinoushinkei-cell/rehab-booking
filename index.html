@@ -740,6 +740,8 @@ let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
 let bookingUnits={}; // {date:{staffId:{time:1|2}}} 1単位(20分)か2単位(40分/通常)かを記録
 let notifications=[];
+// 操作主体：トップ画面の管理者ログインはadmin、患者IDログインはpatient
+let currentActor='none';
 let settings={start:"",end:"",tstart:"",tend:""};
 let externalLinks={homepage:"",instagram:""};
 let slotDefs=[];
@@ -2509,7 +2511,7 @@ async function pubDoBook(fullDate,time,dateStr2,dayLabel){
   if(!r.ok){err.textContent=r.reason;err.style.display='block';
     await reloadBookings();renderPublicSlots();return;}
   const p=patients[pid];
-  await dbAddNotification(`${p.name}（${pid}）が ${dateStr2} ${dayLabel} ${normTime}（${getStaffName(pubTherapist)}）に予約`,pid);
+  await dbAddNotification(`${p.name}（${pid}）が ${dateStr2} ${dayLabel} ${normTime}（${getStaffName(pubTherapist)}）に予約`,'patient');
   await reloadBookings();
   closeModal();renderPublicSlots();
   showToast(`${p.name} さんの予約を登録しました`,'#34C759');
@@ -2520,7 +2522,7 @@ function patientLogin(){
   const id=document.getElementById('pid-input').value.trim().toLowerCase();
   const err=document.getElementById('p-err');
   if(patients[id]){
-    currentPid=id;err.style.display='none';
+    currentPid=id;currentActor='patient';err.style.display='none';
     document.getElementById('p-welcome').textContent=patients[id].name+' さん';
     document.getElementById('p-id-sub').textContent=id;
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
@@ -2739,7 +2741,7 @@ async function doCancel(date,time,therapist){
   const ok=await dbCancelSlot(date,therapist,time);
   if(!ok){showToast('キャンセル処理に失敗しました');btn.disabled=false;btn.textContent='キャンセル確定';return;}
   const d=parseLocalDate(date);
-  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,currentPid);
+  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,'patient');
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
@@ -2777,7 +2779,7 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
-  await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,currentPid);
+  await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,'patient');
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
@@ -2791,6 +2793,7 @@ let appDataReady=null;
 async function adminLogin(){
   const pw=document.getElementById('admin-pw').value;
   if(pw!==ADMIN_PW){document.getElementById('admin-err').style.display='block';return;}
+   currentActor='admin';
   document.getElementById('admin-err').style.display='none';
   document.getElementById('admin-pw').value='';
   if(appDataReady){try{await appDataReady;}catch(e){console.error('初期データ待機エラー',e);}}
