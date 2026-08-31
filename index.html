@@ -995,41 +995,20 @@ function slotDefsForDay(dow,therapist){
 }
 
 // ---- 臨時営業日 ----
-let specialDays=[]; // 新形式: 1登録=1行 {id,special_date,therapist,time_slot:"09:00-10:00"}; 旧形式の20分行も互換対応
-function parseSpecialRow(row){
-  const raw=String(row.time_slot||'').trim();
-  const m=raw.match(/^(\d{1,2}:\d{2})\s*[-〜~]\s*(\d{1,2}:\d{2})$/);
-  if(m){
-    const start=normalizeTime(m[1]), end=normalizeTime(m[2]);
-    const sm=timeMins(start), em=timeMins(end);
-    if(em>sm) return {...row,start,end,startMin:sm,endMin:em,duration:em-sm,units:Math.round((em-sm)/20),isRange:true};
-  }
-  const t=normalizeTime(raw);
-  const tm=timeMins(t);
-  return {...row,start:t,end:addMinutesToTime('00:00',tm+20),startMin:tm,endMin:tm+20,duration:20,units:1,isRange:false,time_slot:t};
+let specialDays=[]; // [{id,special_date,therapist,time_slot}]
+function getSpecialTimesForDay(ds,therapist){
+  return specialDays
+    .filter(s=>s.special_date===ds&&s.therapist===therapist)
+    .map(s=>normalizeTime(s.time_slot))
+    .filter((v,i,a)=>a.indexOf(v)===i);
 }
-function getSpecialBusinessWindows(ds,therapist){
-  const rows=specialDays.filter(s=>s.special_date===ds&&s.therapist===therapist&&s.time_slot).map(parseSpecialRow);
-  const ranges=rows.filter(r=>r.isRange).sort((a,b)=>a.startMin-b.startMin);
-  const legacy=rows.filter(r=>!r.isRange).sort((a,b)=>a.startMin-b.startMin);
-  const groups=[];
-  legacy.forEach(row=>{
-    const prev=groups[groups.length-1];
-    if(prev && prev.endMin===row.startMin){ prev.rows.push(row); prev.endMin=row.endMin; }
-    else groups.push({startMin:row.startMin,endMin:row.endMin,rows:[row],isRange:false});
-  });
-  const windows=[...ranges.map(r=>({start:r.start,end:r.end,startMin:r.startMin,endMin:r.endMin,duration:r.duration,units:r.units,rows:[r],isRange:true})),
-    ...groups.map(g=>({start:addMinutesToTime('00:00',g.startMin),end:addMinutesToTime('00:00',g.endMin),startMin:g.startMin,endMin:g.endMin,duration:g.endMin-g.startMin,units:Math.round((g.endMin-g.startMin)/20),rows:g.rows,isRange:false}))];
-  return windows.sort((a,b)=>a.startMin-b.startMin);
+function isSpecialBusinessSlot(ds,therapist,time){
+  return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
 }
-function getSpecialBusinessWindow(ds,therapist,time){
-  const nt=normalizeTime(time);
-  return getSpecialBusinessWindows(ds,therapist).find(w=>w.start===nt)||null;
+function hasSpecialBusinessDay(ds,therapist){
+  return getSpecialTimesForDay(ds,therapist).length>0;
 }
-// 臨時営業は登録された開始時刻だけを予約開始枠として表示する。
-function getSpecialTimesForDay(ds,therapist){ return getSpecialBusinessWindows(ds,therapist).map(w=>w.start); }
-function isSpecialBusinessSlot(ds,therapist,time){ return !!getSpecialBusinessWindow(ds,therapist,time); }
-function hasSpecialBusinessDay(ds,therapist){ return getSpecialBusinessWindows(ds,therapist).length>0; }
+// 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
 function timesForDate(ds,therapist){
   const dow=parseLocalDate(ds).getDay();
   const defined=slotDefsForDay(dow,therapist);
@@ -1336,7 +1315,7 @@ async function loadAllData(){
 
   specialDays=specialRows
     .filter(s=>s&&s.special_date&&s.time_slot)
-    .map(s=>({...s}));
+    .map(s=>({...s,time_slot:normalizeTime(s.time_slot)}));
 
   // 取得失敗がある場合でも、ここではthrowしない。
   // アプリは起動し、失敗したテーブルだけ後から再読込できる。
@@ -1398,7 +1377,7 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
       if(!['reserved','noshow','done'].includes(r.status))return false;
       const rStart=timeMins(r.time_slot);
       const rUnit=Number(r.unit||2);
-      const rEnd=rStart+(Math.max(1,rUnit)*20);
+      const rEnd=rStart+(rUnit===3?60:(rUnit===1?20:40));
       return startMin<rEnd && rStart<endMin;
     });
     if(occupied.length){
@@ -1537,6 +1516,7 @@ async function reloadBookings(){
 }
 
 async function dbAddNotification(text,operator='system'){
+  if(String(text||'').includes('【管理者】')) operator='admin';
   const {data,error}=await sb.from('notifications').insert({message:text,operator}).select().single();
   if(error)return;
   notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator||operator});
@@ -1857,11 +1837,11 @@ async function renderWeekTable(){
     const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
-    html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると担当者を選択して、その日の予約を一括処理できます">
+    html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると担当者を選択して、その日の予約をすべて実施済にできます">
       <div style="font-weight:600">${dayLabel}</div>
       <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
       ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
-      <div style="font-size:8px;color:#2563EB;margin-top:2px">日付を押して一括処理</div>
+      <div style="font-size:8px;color:#2563EB;margin-top:2px">日付を押して一括実施済</div>
     </th>`;
   });
   html+=`</tr>`;
@@ -1962,54 +1942,52 @@ function weekTableBulkDoneModal(ds){
     const statuses=bookingStatuses[ds]?.[s.id]||{};
     const reserved=Object.values(statuses).filter(st=>st==='reserved').length;
     const done=Object.values(statuses).filter(st=>st==='done').length;
-    const cancellable=reserved+done;
-    return {id:s.id,name:s.name,reserved,done,cancellable};
+    return {id:s.id,name:s.name,reserved,done};
   });
   openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">${m}月${day}日（${wd}）の一括処理</div>
-    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px;line-height:1.6">担当者を選択してください。「すべて実施済」は予約中の予約を実施済にします。「すべてキャンセル」は予約中＋すでに実施済の予約をすべてキャンセルします。</p>
-    <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px">
-      ${counts.map(c=>`<div style="border:1px solid #E5E5EA;border-radius:12px;padding:10px">
-        <div style="font-weight:600;margin-bottom:8px">${c.name}<span style="font-size:11px;color:#8E8E93;margin-left:6px">予約中 ${c.reserved}件${c.done?` ／ 実施済 ${c.done}件`:''}</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-          <button class="btn btn-green" onclick="weekTableBulkDone('${ds}','${c.id}')">すべて実施済</button>
-          <button class="btn" style="background:#FEE2E2;color:#B91C1C;border:1px solid #FECACA" onclick="weekTableBulkCancel('${ds}','${c.id}')">すべてキャンセル</button>
-        </div>
-      </div>`).join('')}
+    <div class="modal-title">${m}月${day}日（${wd}）の一括実施済</div>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px;line-height:1.6">担当者を選択すると、その担当者の当日の「予約中」の予約をすべて実施済にします。すでに実施済・キャンセル・振替・来なかった予約は変更しません。</p>
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:14px">
+      ${counts.map(c=>`<button class="btn btn-green" onclick="weekTableBulkDone('${ds}','${c.id}')">${c.name}<span style="font-size:11px;margin-left:6px;opacity:.8">予約中 ${c.reserved}件${c.done?` ／ 実施済 ${c.done}件`:''}</span></button>`).join('')}
     </div>
     <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
 }
 async function weekTableBulkDone(ds,therapist){
   const statuses=bookingStatuses[ds]?.[therapist]||{};
   const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved').map(([t])=>normalizeTime(t));
-  if(!targetTimes.length){ showToast('実施済に変更する「予約中」の予約はありません'); return; }
+  if(!targetTimes.length){
+    showToast('実施済に変更する「予約中」の予約はありません');
+    return;
+  }
   const ok=confirm(`${getStaffName(therapist)}の${ds}の予約をすべて実施済にしますか？\n対象：${targetTimes.length}件`);
   if(!ok)return;
-  const {data,error}=await sb.from('bookings').update({status:'done'}).eq('booking_date',ds).eq('therapist',therapist).eq('status','reserved').select('id,patient_id,time_slot,unit');
-  if(error){ console.error('一括実施済更新失敗',error); showToast('一括更新に失敗しました。時間をおいて再度お試しください。'); return; }
+  const {data,error}=await sb.from('bookings')
+    .update({status:'done'})
+    .eq('booking_date',ds)
+    .eq('therapist',therapist)
+    .eq('status','reserved')
+    .select('id,patient_id,time_slot,unit');
+  if(error){
+    console.error('一括実施済更新失敗',error);
+    showToast('一括更新に失敗しました。時間をおいて再度お試しください。');
+    return;
+  }
   (data||[]).forEach(r=>{
     const t=normalizeTime(r.time_slot);
-    if(!bookingStatuses[ds])bookingStatuses[ds]={}; if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={}; bookingStatuses[ds][therapist][t]='done';
-    if(!bookingUnits[ds])bookingUnits[ds]={}; if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={}; bookingUnits[ds][therapist][t]=r.unit||2;
+    if(!bookingStatuses[ds])bookingStatuses[ds]={};
+    if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={};
+    bookingStatuses[ds][therapist][t]='done';
+    if(!bookingUnits[ds])bookingUnits[ds]={};
+    if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={};
+    bookingUnits[ds][therapist][t]=r.unit||2;
   });
   await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「実施済」に変更【管理者】`,'admin');
-  closeModal(); await reloadBookings(); await renderWeekTable(); renderTodaySchedule(); renderNotifications(); showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件を実施済にしました`,'#34C759');
-}
-async function weekTableBulkCancel(ds,therapist){
-  const statuses=bookingStatuses[ds]?.[therapist]||{};
-  const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved'||st==='done').map(([t])=>normalizeTime(t));
-  if(!targetTimes.length){ showToast('キャンセルする「予約中・実施済」の予約はありません'); return; }
-  const ok=confirm(`${getStaffName(therapist)}の${ds}の予約（実施済を含む）をすべてキャンセルしますか？\n対象：${targetTimes.length}件`);
-  if(!ok)return;
-  const {data,error}=await sb.from('bookings').update({status:'cancelled'}).eq('booking_date',ds).eq('therapist',therapist).in('status',['reserved','done']).select('id,patient_id,time_slot,unit');
-  if(error){ console.error('一括キャンセル更新失敗',error); showToast('一括キャンセルに失敗しました。時間をおいて再度お試しください。'); return; }
-  (data||[]).forEach(r=>{
-    const t=normalizeTime(r.time_slot);
-    if(!bookingStatuses[ds])bookingStatuses[ds]={}; if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={}; bookingStatuses[ds][therapist][t]='cancelled';
-    if(!bookingUnits[ds])bookingUnits[ds]={}; if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={}; bookingUnits[ds][therapist][t]=r.unit||2;
-  });
-  await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「キャンセル」に変更（実施済を含む）【管理者】`,'admin');
-  closeModal(); await reloadBookings(); await renderWeekTable(); renderTodaySchedule(); renderNotifications(); showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件をキャンセルしました`,'#FF3B30');
+  closeModal();
+  await reloadBookings();
+  await renderWeekTable();
+  renderTodaySchedule();
+  renderNotifications();
+  showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件を実施済にしました`,'#34C759');
 }
 
 function weekTableBookModal(ds,therapist,time){
@@ -2040,13 +2018,13 @@ function weekTableBookModal(ds,therapist,time){
     <div class="input-group" style="margin-top:4px">
       <label>🔁 登録方法</label>
       <select id="wt-auto">
-        ${getSpecialBusinessWindow(ds,therapist,time)?`<option value="special_units">臨時営業（${getSpecialBusinessWindow(ds,therapist,time).duration}分・${getSpecialBusinessWindow(ds,therapist,time).units}単位）</option>`:`<option value="">今回のみ（${time}に登録）</option>
+        <option value="">今回のみ（${time}に登録）</option>
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
         ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
         ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
-        <option value="three_units">3単位（60分）</option>`}
+        <option value="three_units">3単位（60分）</option>
       </select>
-      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">臨時営業日は登録した開始時刻だけが予約開始枠です。開始〜終了時間の長さから単位数を自動計算します。</p>
+      <p style="font-size:11px;color:#8E8E93;margin-top:6px;line-height:1.5">「1単位」は20分、「2単位」は40分、「3単位」は60分です。3単位登録では1件の予約を3単位として登録します。</p>
     </div>
     <p id="wt-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <div style="display:flex;gap:8px">
@@ -2121,15 +2099,13 @@ async function weekTableDoBook(ds,therapist,time){
   const err=document.getElementById('wt-err');
   const btn=document.getElementById('wt-submit');
   const auto=document.getElementById('wt-auto').value;
-  const specialWindow=getSpecialBusinessWindow(ds,therapist,time);
   // 「1単位」を選んだ場合は、実際に登録する時間を選択に応じて前半／後半に切り替える
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
   const isHalf=auto==='half_1'||auto==='half_2';
   const isThreeUnits=auto==='three_units';
-  const isSpecialUnits=auto==='special_units';
-  const actualTime=isSpecialUnits?(specialWindow?.start||time):auto==='half_1'?baseTime:auto==='half_2'?secondTime:(isThreeUnits?baseTime:time);
-  const unit=isSpecialUnits?Number(specialWindow?.units||0):(isHalf?1:(isThreeUnits?3:2));
+  const actualTime=auto==='half_1'?baseTime:auto==='half_2'?secondTime:(isThreeUnits?baseTime:time);
+  const unit=isHalf?1:(isThreeUnits?3:2);
   const normTime=normalizeTime(actualTime);
 
   if(!wtSelectedPid){err.textContent='患者を検索して選択してください';err.style.display='block';return;}
@@ -2140,23 +2116,14 @@ async function weekTableDoBook(ds,therapist,time){
   // 予約枠の開始時刻は40分単位でも、実際の診療時間は20分刻みで連続しているため、
   // 「8:30・8:50・9:10」の3つすべてがslotDefsに存在することは要求しない。
   // 最終的な重複判定はdbBookSlotで、既存予約の実時間との重なりを確認する。
-  if(isSpecialUnits){
-    if(!specialWindow || specialWindow.start!==normTime){
-      err.textContent='臨時営業の予約開始枠が確認できません。別の時間をお選びください。';
-      err.style.display='block';return;
-    }
-    if(!isSlotAvailable(ds,normTime,therapist)){
-      err.textContent=`${normTime}は現在予約できない時間帯です。別の時間をお選びください。`;
-      err.style.display='block';return;
-    }
-  }else if(isThreeUnits){
+  if(isThreeUnits){
     const t1=normTime;
     const tEnd=normalizeTime(addMinutesToTime(t1,60));
     if(!isSlotAvailable(ds,t1,therapist)){
       err.textContent=`${t1}は現在予約できない時間帯です。別の時間をお選びください。`;
       err.style.display='block';return;
     }
-    // 通常営業の3単位だけ、60分全体の休診・休暇を確認する。
+    // 60分の途中で休診・PT休暇にかかる場合は登録不可。
     for(const offset of [0,20,40]){
       const seg=normalizeTime(addMinutesToTime(t1,offset));
       if(!isSlotAvailable(ds,seg,therapist)){
@@ -2794,14 +2761,11 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
     return;
   }
 
-  // 臨時営業日は開始時刻だけを予約開始枠とし、営業時間から単位数を自動決定する。
-  const specialWindow=getSpecialBusinessWindow(fullDate,therapist,time);
-  const requestedUnit=specialWindow?Number(specialWindow.units||1):2;
-
   // 算定期限超過後は当月13単位まで。患者側予約でも同じ制限を適用する。
   if(isOverDeadline(currentPid)){
     const ym=fullDate.substring(0,7);
     const usedUnits=await countMonthlyBookingUnits(currentPid,ym);
+    const requestedUnit=2;
     if(usedUnits+requestedUnit>13){
       document.getElementById('res-err').textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
       document.getElementById('res-err').style.display='block';
@@ -2810,7 +2774,7 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   }
 
   btn.disabled=true;btn.textContent='処理中...';
-  const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid,requestedUnit);
+  const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
   await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,currentPid);
@@ -3698,62 +3662,83 @@ ${tableHTML}
 }
 
 // ---- 過去の予約を指定の月に反映 ----
+function getNthWeekdayDate(year, monthIndex, dow, nth){
+  // 月の第n週・同じ曜日の日付を返す。存在しない場合はnull。
+  const first=new Date(year,monthIndex,1);
+  const offset=(dow-first.getDay()+7)%7;
+  const day=1+offset+(nth-1)*7;
+  const d=new Date(year,monthIndex,day);
+  return d.getMonth()===monthIndex?d:null;
+}
+function getWeekOfMonth(dateObj){
+  return Math.floor((dateObj.getDate()-1)/7)+1;
+}
+
+// ---- 過去の予約を指定の月に反映 ----
 function openPrevMonthReflect(){
-  // 選択された参照月を取得
   const sel=document.getElementById('prev-month-select');
   let prevYM=sel?.value||'';
   if(!prevYM){
-    // デフォルト：先月
     const pd=new Date(TODAY.getFullYear(),TODAY.getMonth()-1,1);
     prevYM=`${pd.getFullYear()}-${String(pd.getMonth()+1).padStart(2,'0')}`;
   }
-  // 選択された反映先の月を取得（未選択なら今月）
   const targetSel=document.getElementById('target-month-select');
   let targetYM=targetSel?.value||'';
-  if(!targetYM){
-    targetYM=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
-  }
+  if(!targetYM)targetYM=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
   const [py,pm]=prevYM.split('-').map(Number);
   const [ty,tm]=targetYM.split('-').map(Number);
 
-  // 参照月の予約パターン収集（患者ごと：曜日・時間・担当）
-  const patterns={};
-  Object.keys(bookings).forEach(ds=>{
-    if(!ds.startsWith(prevYM))return;
-    const d=parseLocalDate(ds);const dow=d.getDay();
-    staffList.forEach(s=>{
-      const th=s.id;
-      Object.entries(bookings[ds][th]||{}).forEach(([time,pid])=>{
-        if(!pid)return;
-        if(!patterns[pid])patterns[pid]=[];
-        if(!patterns[pid].some(p=>p.dow===dow&&p.time===time&&p.therapist===th))
-          patterns[pid].push({dow,time,therapist:th});
+  // 参照月の「実際に表示されていた予約枠」を収集。
+  // 予約中・実施済・来なかった・キャンセル・空きなど、登録状態では絞り込まない。
+  // 空きの通常枠はターゲット側の営業ルールで自然に再現されるため、
+  // 特別営業枠だけは別途臨時営業として反映する。
+  const patterns=[];
+  const seen=new Set();
+  const sourceDays=monthDays(prevYM);
+  sourceDays.forEach(ds=>{
+    const d=parseLocalDate(ds);
+    const week=getWeekOfMonth(d),dow=d.getDay();
+    staffList.forEach(st=>{
+      const th=st.id;
+      const times=timesForDate(ds,th);
+      times.forEach(time=>{
+        const nt=normalizeTime(time);
+        const key=`${week}|${dow}|${th}|${nt}`;
+        if(seen.has(key))return;
+        seen.add(key);
+        const status=bookingStatuses[ds]?.[th]?.[nt]||'';
+        const pid=bookings[ds]?.[th]?.[nt]||null;
+        const unit=Number(bookingUnits[ds]?.[th]?.[nt]||2);
+        const special=getSpecialTimesForDay(ds,th).includes(nt);
+        patterns.push({week,dow,therapist:th,time:nt,pid,status,unit,special});
       });
     });
   });
 
-  if(!Object.keys(patterns).length){
-    showToast(`${py}年${pm}月の予約データが見つかりません`,'#FF9500');
+  if(!patterns.length){
+    showToast(`${py}年${pm}月の予約枠データが見つかりません`,'#FF9500');
     return;
   }
 
+  const booked=patterns.filter(p=>p.pid).length;
+  const openCount=patterns.length-booked;
   let html=`<div class="modal-handle"></div>
-    <div class="modal-title">📋 予約の一括反映</div>
+    <div class="modal-title">📋 予約枠の一括反映</div>
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">${py}年${pm}月 → ${ty}年${tm}月</p>
-    <div style="max-height:260px;overflow-y:auto;margin-bottom:12px">`;
-
-  Object.entries(patterns).forEach(([pid,pats])=>{
-    const p=patients[pid];if(!p)return;
-    const patStr=pats.map(pt=>`${DAY_NAMES[pt.dow]}曜 ${pt.time}（${getStaffName(pt.therapist)}）`).join('、');
-    html+=`<div style="padding:8px 0;border-bottom:1px solid #F2F2F7;font-size:13px">
-      <span style="font-weight:600">${p.name}</span>
-      <span style="font-size:11px;color:#8E8E93;margin-left:6px">${pid}</span>
-      <div style="font-size:12px;color:#5E35B1;margin-top:2px">${patStr}</div>
-    </div>`;
-  });
-
-  html+=`</div>
-    <div class="notice" style="margin-bottom:12px">⚠️ 既に予約済みの枠・休診日・PT休暇日はスキップされます。反映先の月のカレンダー構成に合わせて該当する曜日のみ反映されます。</div>
+    <div class="notice" style="margin-bottom:12px;line-height:1.7">
+      参照月の<strong>登録状態に関係なく</strong>、同じ「第何週・曜日・時間・担当者」を反映します。<br>
+      予約・実施済・空き枠を区別せず対象にします。${booked?`予約患者 ${booked}件、空き枠 ${openCount}件を対象にします。`:''}
+    </div>
+    <div style="max-height:280px;overflow-y:auto;margin-bottom:12px">
+      ${patterns.slice(0,120).map(p=>{
+        const nm=p.pid?(patients[p.pid]?.name||'不明'):'空き';
+        return `<div style="padding:6px 0;border-bottom:1px solid #F2F2F7;font-size:12px">
+          第${p.week}週・${DAY_NAMES[p.dow]}曜 ${p.time}（${getStaffName(p.therapist)}） → ${nm}${p.status==='done'?'・実施済':''}
+        </div>`;
+      }).join('')}
+      ${patterns.length>120?`<div style="padding:8px 0;font-size:11px;color:#8E8E93">ほか ${patterns.length-120}枠</div>`:''}
+    </div>
+    <div class="notice" style="margin-bottom:12px">⚠️ 反映先で既に予約が入っている枠、休診・PT休暇など予約不可の時間はスキップします。空き枠は予約可能枠として反映し、患者の予約がある枠は同じ患者で予約します。</div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-block" onclick="closeModal()">キャンセル</button>
       <button class="btn btn-block" style="background:#5E35B1;color:#fff;border-color:#5E35B1" id="prev-reflect-btn" onclick="doPrevMonthReflect('${prevYM}','${targetYM}')">${tm}月に一括反映する</button>
@@ -3764,61 +3749,86 @@ function openPrevMonthReflect(){
 async function doPrevMonthReflect(prevYM,targetYM){
   const btn=document.getElementById('prev-reflect-btn');
   if(btn){btn.disabled=true;btn.textContent='処理中...';}
-
-  // 反映先の月（未指定時は今月にフォールバック）
   if(!targetYM)targetYM=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
   const [targetYear,targetMonthNum]=targetYM.split('-').map(Number);
-  const targetMonth=targetMonthNum-1; // 0始まりの月index
+  const targetMonth=targetMonthNum-1;
   const [py,pm]=prevYM.split('-').map(Number);
 
-  // 参照月の予約をDBから直接取得（ローカルに無い場合も対応）
-  let prevPatterns={};
-  const {data:prevBookings}=await sb.from('bookings')
-    .select('booking_date,time_slot,therapist,patient_id')
+  // 参照月をDBから取得し、statusでは絞り込まない。
+  const {data:prevRows,error:prevErr}=await sb.from('bookings')
+    .select('booking_date,time_slot,therapist,patient_id,status,unit')
     .gte('booking_date',`${prevYM}-01`)
-    .lte('booking_date',`${prevYM}-31`)
-    .eq('status','reserved');
-  (prevBookings||[]).forEach(b=>{
-    const d=parseLocalDate(b.booking_date);const dow=d.getDay();
-    const pid=b.patient_id;
-    if(!pid)return;
-    if(!prevPatterns[pid])prevPatterns[pid]=[];
-    if(!prevPatterns[pid].some(p=>p.dow===dow&&p.time===b.time_slot&&p.therapist===b.therapist))
-      prevPatterns[pid].push({dow,time:b.time_slot,therapist:b.therapist});
-  });
-
-  // 反映先の月の全日付を生成
-  const daysInTargetMonth=new Date(targetYear,targetMonth+1,0).getDate();
-  const targetDates=[];
-  for(let d=1;d<=daysInTargetMonth;d++){
-    targetDates.push(`${targetYM}-${String(d).padStart(2,'0')}`);
+    .lte('booking_date',`${prevYM}-31`);
+  if(prevErr){
+    if(btn){btn.disabled=false;btn.textContent=`${targetMonthNum}月に一括反映する`;}
+    showToast(`参照月のデータ取得に失敗しました（${prevErr.message||'不明'}）`,'#FF3B30');
+    return;
   }
 
-  let successCount=0,skipCount=0;
-  for(const [pid,pats] of Object.entries(prevPatterns)){
-    const p=patients[pid];if(!p)continue;
-    for(const pat of pats){
-      // 反映先の月の同じ曜日の日付（カレンダーに存在する曜日のみ）
-      const targets=targetDates.filter(ds=>parseLocalDate(ds).getDay()===pat.dow);
-      for(const ds of targets){
-        if(isTherapistOff(ds,pat.therapist)){skipCount++;continue;}
-        if(!isSlotAvailable(ds,pat.time,pat.therapist)){skipCount++;continue;}
-        if(isOverDeadline(pid)){
-          const usedUnits=await countMonthlyBookingUnits(pid,targetYM);
-          if(usedUnits+2>13){skipCount++;continue;}
-        }
-        ensureBookingShape(ds);
-        if(bookings[ds]?.[pat.therapist]?.[pat.time]){skipCount++;continue;}
-        const r=await dbBookSlot(ds,pat.therapist,pat.time,pid);
-        if(r.ok)successCount++;else skipCount++;
+  const rowMap={};
+  (prevRows||[]).forEach(b=>{
+    if(!b?.booking_date||!b?.therapist||!b?.time_slot)return;
+    const d=parseLocalDate(b.booking_date);
+    const key=`${getWeekOfMonth(d)}|${d.getDay()}|${b.therapist}|${normalizeTime(b.time_slot)}`;
+    rowMap[key]={...b,time_slot:normalizeTime(b.time_slot)};
+  });
+
+  const patterns=[];const seen=new Set();
+  monthDays(prevYM).forEach(ds=>{
+    const d=parseLocalDate(ds),week=getWeekOfMonth(d),dow=d.getDay();
+    staffList.forEach(st=>{
+      const th=st.id;
+      timesForDate(ds,th).forEach(time=>{
+        const nt=normalizeTime(time),key=`${week}|${dow}|${th}|${nt}`;
+        if(seen.has(key))return;
+        seen.add(key);
+        const row=rowMap[key];
+        patterns.push({week,dow,therapist:th,time:nt,pid:row?.patient_id||null,status:row?.status||'',unit:Number(row?.unit||2),special:getSpecialTimesForDay(ds,th).includes(nt)});
+      });
+    });
+  });
+
+  // 反映先の月の「第n週・同じ曜日」へ1対1で対応させる。
+  let successCount=0,skipCount=0,openCount=0,bookedCount=0,specialCount=0;
+  for(const pat of patterns){
+    const targetDate=getNthWeekdayDate(targetYear,targetMonth,pat.dow,pat.week);
+    if(!targetDate){skipCount++;continue;}
+    const ds=dateStr(targetDate);
+
+    // 臨時営業枠は、元の開始枠をターゲットにも作成する。
+    if(pat.special && !getSpecialTimesForDay(ds,pat.therapist).includes(pat.time)){
+      const {data,error}=await sb.from('special_business_days').insert({special_date:ds,therapist:pat.therapist,time_slot:pat.time}).select().single();
+      if(!error && data){
+        specialDays.push({...data,time_slot:normalizeTime(data.time_slot)});
+        specialCount++;
       }
+    }
+
+    // 予約枠として利用できるか確認。空き枠も対象だが、休診・休暇はスキップ。
+    if(!isSlotAvailable(ds,pat.time,pat.therapist)){skipCount++;continue;}
+    ensureBookingShape(ds);
+    const existingStatus=bookingStatuses[ds]?.[pat.therapist]?.[pat.time]||'';
+    const existingPid=bookings[ds]?.[pat.therapist]?.[pat.time]||null;
+    if(existingPid || ['reserved','noshow','done'].includes(existingStatus)){skipCount++;continue;}
+
+    if(pat.pid){
+      // 患者がいる枠は、実施済・キャンセル等の状態に関係なく「予約」として反映。
+      // 反映先の将来予約なので、参照元のdone等をそのままコピーしない。
+      const r=await dbBookSlot(ds,pat.therapist,pat.time,pat.pid,pat.unit||2);
+      if(r.ok){successCount++;bookedCount++;}else skipCount++;
+    }else{
+      // 空き枠は既存の営業ルールで既に予約可能なため、DBへ患者なし行は作成しない。
+      // 臨時営業枠だった場合のみ上でspecial_business_daysを作成して明示的に枠を再現。
+      successCount++;openCount++;
     }
   }
 
-  await dbAddNotification(`${py}年${pm}月の予約パターンを${targetYear}年${targetMonthNum}月に一括反映：${successCount}件登録`,'admin');
-  await dbLog('admin','prev_month_reflect',`${py}/${pm}→${targetYear}/${targetMonthNum} ${successCount}件`);
-  closeModal();renderNotifications();
-  showToast(`${successCount}件を反映しました（スキップ：${skipCount}件）`,'#34C759');
+  await dbAddNotification(`${py}年${pm}月の予約枠を${targetYear}年${targetMonthNum}月へ一括反映：予約${bookedCount}件・空き枠${openCount}件・臨時営業${specialCount}件`,'admin');
+  await dbLog('admin','prev_month_reflect',`${py}/${pm}→${targetYear}/${targetMonthNum} 予約${bookedCount} 空き${openCount} 臨時営業${specialCount} スキップ${skipCount}`);
+  closeModal();renderNotifications();renderSpecialDaysList();
+  showToast(`反映完了：予約${bookedCount}件・空き枠${openCount}件（スキップ：${skipCount}件）`,'#34C759');
+  await reloadBookings();
+  renderWeekTable();
 }
 
 // ---- SETTINGS ----
@@ -3889,31 +3899,46 @@ function renderSettingsDisplay(){
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
 // ---- 臨時営業日設定 ----
 function getSpecialDayGroups(){
-  // 新形式は1行=1登録として絶対に結合しない。
-  // 旧形式（time_slotがHH:MMのみ）は連続20分枠を従来どおりまとめて表示する。
-  const rows=specialDays.map(parseSpecialRow).sort((a,b)=>{
-    const d=a.special_date.localeCompare(b.special_date); if(d!==0)return d;
-    const t=a.therapist.localeCompare(b.therapist); if(t!==0)return t;
-    return a.startMin-b.startMin;
+  const sorted=[...specialDays].sort((a,b)=>{
+    const d=a.special_date.localeCompare(b.special_date);
+    if(d!==0)return d;
+    const t=a.therapist.localeCompare(b.therapist);
+    if(t!==0)return t;
+    return timeMins(a.time_slot)-timeMins(b.time_slot);
   });
-  const result=[]; const legacyGroups=[];
-  rows.filter(r=>r.isRange).forEach(r=>result.push({special_date:r.special_date,therapist:r.therapist,startMin:r.startMin,endMin:r.endMin,rows:[r],isRange:true}));
-  rows.filter(r=>!r.isRange).forEach(row=>{
-    const prev=legacyGroups[legacyGroups.length-1];
-    if(prev&&prev.special_date===row.special_date&&prev.therapist===row.therapist&&prev.endMin===row.startMin){prev.rows.push(row);prev.endMin=row.endMin;}
-    else legacyGroups.push({special_date:row.special_date,therapist:row.therapist,startMin:row.startMin,endMin:row.endMin,rows:[row],isRange:false});
+  const groups=[];
+  sorted.forEach(row=>{
+    const prev=groups[groups.length-1];
+    const rowMin=timeMins(row.time_slot);
+    if(prev&&prev.special_date===row.special_date&&prev.therapist===row.therapist&&prev.endMin===rowMin){
+      prev.rows.push(row);prev.endMin=rowMin+20;
+    }else{
+      groups.push({special_date:row.special_date,therapist:row.therapist,startMin:rowMin,endMin:rowMin+20,rows:[row]});
+    }
   });
-  return result.concat(legacyGroups).sort((a,b)=>a.special_date.localeCompare(b.special_date)||a.therapist.localeCompare(b.therapist)||a.startMin-b.startMin);
+  return groups;
 }
 function renderSpecialDaysList(){
-  const el=document.getElementById('special-day-list'); if(!el)return;
+  const el=document.getElementById('special-day-list');
+  if(!el)return;
   if(!specialDays.length){el.innerHTML='<div class="empty">臨時営業日の登録はありません</div>';return;}
   const groups=getSpecialDayGroups();
-  el.innerHTML=groups.map(g=>{
-    const d=parseLocalDate(g.special_date), mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
-    const start=addMinutesToTime('00:00',g.startMin), end=addMinutesToTime('00:00',g.endMin);
-    const mins=g.endMin-g.startMin, units=Math.round(mins/20), ids=g.rows.map(r=>r.id).join(',');
-    return `<div class="card" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${start}〜${end}</span><span class="chip" style="margin-left:6px;${staffChipStyle(g.therapist)}">${getStaffName(g.therapist)}</span><span style="font-size:11px;color:#8E8E93;margin-left:6px">${mins}分・${units}単位</span></div><button class="btn btn-sm btn-danger" onclick="deleteSpecialDayGroup('${ids}')">削除</button></div>`;
+  el.innerHTML=groups.map((g,idx)=>{
+    const d=parseLocalDate(g.special_date);
+    const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const start=`${Math.floor(g.startMin/60)}:${String(g.startMin%60).padStart(2,'0')}`;
+    const end=`${Math.floor(g.endMin/60)}:${String(g.endMin%60).padStart(2,'0')}`;
+    const mins=g.endMin-g.startMin;
+    const units=Math.round(mins/20);
+    const ids=g.rows.map(r=>r.id).join(',');
+    return `<div class="card" style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1">
+        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${start}〜${end}</span>
+        <span class="chip" style="margin-left:6px;${staffChipStyle(g.therapist)}">${getStaffName(g.therapist)}</span>
+        <span style="font-size:11px;color:#8E8E93;margin-left:6px">${mins}分・${units}単位</span>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDayGroup('${ids}')">削除</button>
+    </div>`;
   }).join('');
 }
 async function addSpecialDay(){
@@ -3932,36 +3957,40 @@ async function addSpecialDay(){
   if(duration<=0){err.textContent='終了時間は開始時間より後に設定してください';err.style.display='block';return;}
   if(startMin%20!==0||endMin%20!==0){err.textContent='開始時間・終了時間は20分単位で設定してください';err.style.display='block';return;}
   if(duration%20!==0){err.textContent='開始時間〜終了時間は20分単位で設定してください';err.style.display='block';return;}
-  // 1回の登録を1レコードで保存する。これにより、
-  // 09:00〜10:00、10:00〜11:00、11:00〜12:00を別々に登録した場合も
-  // 3つの臨時営業枠として保持でき、隣接していても結合されない。
-  const newStart=startMin, newEnd=endMin;
-  const existingWindows=getSpecialBusinessWindows(ds,th);
-  if(existingWindows.some(w=>newStart<w.endMin && w.startMin<newEnd)){
+  const segments=[];
+  for(let offset=0;offset<duration;offset+=20){
+    const seg=addMinutesToTime(timeVal,offset);
+    segments.push(normalizeTime(seg));
+  }
+  // 既存の臨時営業・通常枠・予約と時間が重なる部分がある場合は登録しない。
+  const existingSpecial=getSpecialTimesForDay(ds,th);
+  if(segments.some(t=>existingSpecial.includes(t))){
     err.textContent='指定した時間帯に既に臨時営業が登録されています。時間が重ならない範囲で登録してください';err.style.display='block';return;
   }
   const dow=parseLocalDate(ds).getDay();
   const normalTimes=slotDefsForDay(dow,th);
-  if(normalTimes.some(t=>{const m=timeMins(t);return newStart<m+20&&m<newEnd;})){
+  // 通常枠が存在する時間を臨時営業として二重登録する必要はないため、重複を避ける。
+  if(segments.some(t=>normalTimes.includes(t))){
     err.textContent='指定した時間帯に通常の予約枠が含まれています。時間が重ならない範囲で登録してください';err.style.display='block';return;
   }
+  // 既存予約との時間重複を確認（予約がある部分を臨時営業に設定しない）。
   const {data:bkRows,error:bkErr}=await sb.from('bookings').select('time_slot,status,unit').eq('booking_date',ds).eq('therapist',th);
   if(bkErr){console.warn('臨時営業日の予約重複確認に失敗',bkErr);}
   const activeRows=(bkRows||[]).filter(r=>['reserved','done','noshow'].includes(r.status));
   const overlaps=activeRows.some(r=>{
     const rs=timeMins(r.time_slot);const ru=Number(r.unit||2);const re=rs+(ru===3?60:(ru===1?20:40));
-    return newStart<re&&rs<newEnd;
+    return segments.some(t=>{const ss=timeMins(t),se=ss+20;return ss<re&&rs<se;});
   });
   if(overlaps){err.textContent='指定した時間帯に既存の予約があります。予約と重ならない時間を登録してください';err.style.display='block';return;}
-  // DBには既存スキーマのtime_slotだけを使用し、開始〜終了を1値として保存する。
-  // 例：09:00〜10:00 → time_slot = "09:00-10:00"
-  const payload=[{special_date:ds,therapist:th,time_slot:`${normalizeTime(timeVal)}-${normalizeTime(endTimeVal)}`}];
+  // special_business_days テーブルは既存の time_slot 形式を維持し、20分単位の各区間を1行ずつ保存する。
+  // これにより既存DBとの互換性を保ちながら、20〜240分の任意の臨時営業時間を正確に表現する。
+  const payload=segments.map(t=>({special_date:ds,therapist:th,time_slot:t}));
   const {data,error}=await sb.from('special_business_days').insert(payload).select();
   if(error){
     console.error('臨時営業日の追加に失敗',error);
     err.textContent=`追加に失敗しました（${error.message||error.code||'不明'}）`;err.style.display='block';return;
   }
-  (data||[]).forEach(row=>specialDays.push(row));
+  (data||[]).forEach(row=>specialDays.push({...row,time_slot:normalizeTime(row.time_slot)}));
   renderSpecialDaysList();updateLastUpdated();
   const endTime=normalizeTime(addMinutesToTime(timeVal,duration));
   await dbLog('admin','add_special_day',`${ds} ${normalizeTime(timeVal)}〜${endTime} ${duration}分・${duration/20}単位 ${getStaffName(th)}`);
