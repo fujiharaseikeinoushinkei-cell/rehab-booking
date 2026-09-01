@@ -451,16 +451,27 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         <div style="font-size:14px;font-weight:700">担当者別・曜日別 基本表</div>
         <button class="btn btn-sm" onclick="renderBasicBookingTable()">↻ 更新</button>
       </div>
+      <div class="input-group" style="margin-bottom:12px">
+        <label>担当者</label>
+        <select id="basic-booking-therapist" onchange="renderBasicBookingTable()"></select>
+      </div>
       <div id="basic-booking-table"></div>
     </div>
     <div class="card" style="background:#E8F4FF;border-color:#B3D4FF">
       <div style="font-size:14px;font-weight:700;color:#004494;margin-bottom:8px">📅 基本表を指定月へ一括反映</div>
-      <div class="input-group" style="margin-bottom:10px">
-        <label>反映する月</label>
-        <input type="month" id="basic-booking-month">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="input-group">
+          <label>担当者</label>
+          <select id="basic-booking-reflect-therapist"></select>
+        </div>
+        <div class="input-group">
+          <label>反映する月</label>
+          <input type="month" id="basic-booking-month">
+        </div>
       </div>
       <div class="notice" style="margin-bottom:10px;line-height:1.6">
-        指定月の営業日について、基本表と同じ<strong>担当者・曜日・時間</strong>の枠へ患者を登録します。
+        選択した<strong>担当者</strong>の基本表を、指定月の営業日に一括反映します。
+        基本表と同じ曜日・時間で、実際に営業していて空いている枠だけに登録します。
         休診日・担当者の休暇・既に予約が入っている枠はスキップします。
       </div>
       <button class="btn btn-primary btn-block" id="basic-booking-reflect-btn" onclick="applyBasicBookingMonth()">📅 指定月に一括反映する</button>
@@ -3533,44 +3544,53 @@ function loadBasicBookingPatternsFromSettings(){
   }catch(e){basicBookingPatterns={};}
 }
 
+function populateBasicBookingTherapistSelects(){
+  const selects=[document.getElementById('basic-booking-therapist'),document.getElementById('basic-booking-reflect-therapist')].filter(Boolean);
+  selects.forEach(sel=>{
+    const current=sel.value;
+    sel.innerHTML=staffList.length
+      ? staffList.map(st=>`<option value="${escapeHtml(st.id)}">${escapeHtml(st.name)}</option>`).join('')
+      : '<option value="">担当者が登録されていません</option>';
+    if(current && staffList.some(st=>st.id===current)) sel.value=current;
+  });
+}
+
 function renderBasicBookingTable(){
   const el=document.getElementById('basic-booking-table');
   if(!el)return;
+  populateBasicBookingTherapistSelects();
+  const therapist=document.getElementById('basic-booking-therapist')?.value || staffList[0]?.id || '';
+  const st=staffList.find(x=>x.id===therapist);
   const activePatients=Object.entries(patients)
     .filter(([id])=>!isArchivedPatient(id))
     .sort((a,b)=>(a[1].kana||a[1].name||'').localeCompare(b[1].kana||b[1].name||'','ja'));
   const patientOptions='<option value="">患者を選択</option>'+activePatients.map(([id,p])=>
     `<option value="${escapeHtml(id)}">${escapeHtml(id)}：${escapeHtml(p.name||'')}</option>`).join('');
 
-  let html='';
-  staffList.forEach(st=>{
-    html+=`<div style="margin-bottom:16px;border:1px solid #E5E5EA;border-radius:10px;overflow:hidden">
-      <div style="background:#F5F5F7;padding:9px 12px;font-size:14px;font-weight:700">${escapeHtml(st.name)}</div>`;
-    BASIC_BOOKING_DAYS.forEach(day=>{
-      const times=slotDefsForDay(day.dow,st.id);
-      html+=`<div style="padding:8px 10px;border-top:1px solid #E5E5EA">
-        <div style="font-size:13px;font-weight:700;margin-bottom:6px">${day.name}</div>`;
-      if(!times.length){
-        html+='<div style="font-size:12px;color:#8E8E93">枠設定なし</div>';
-      }else{
-        html+='<div style="display:flex;flex-direction:column;gap:6px">';
-        times.forEach(time=>{
-          const pid=getBasicBookingPid(st.id,day.dow,time);
-          html+=`<div style="display:grid;grid-template-columns:70px 1fr 42px;gap:8px;align-items:center">
-            <div style="font-size:13px;font-weight:600">${escapeHtml(time)}</div>
-            <select onchange="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}',this.value)" style="min-width:0">
-              ${patientOptions.replace(`value="${escapeHtml(pid)}"`,`value="${escapeHtml(pid)}" selected`)}
-            </select>
-            <button class="btn btn-sm" title="この枠を空欄にする" onclick="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}','');renderBasicBookingTable()">×</button>
-          </div>`;
-        });
-        html+='</div>';
-      }
+  if(!st){el.innerHTML='<div class="empty">担当者が登録されていません</div>';return;}
+  let html=`<div style="margin-bottom:10px;font-size:13px;color:#636366"><strong>${escapeHtml(st.name)}</strong> の基本表</div>`;
+  BASIC_BOOKING_DAYS.forEach(day=>{
+    const times=slotDefsForDay(day.dow,st.id);
+    html+=`<div style="padding:8px 10px;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">${day.name}</div>`;
+    if(!times.length){
+      html+='<div style="font-size:12px;color:#8E8E93">枠設定なし</div>';
+    }else{
+      html+='<div style="display:flex;flex-direction:column;gap:6px">';
+      times.forEach(time=>{
+        const pid=getBasicBookingPid(st.id,day.dow,time);
+        html+=`<div style="display:grid;grid-template-columns:70px 1fr 42px;gap:8px;align-items:center">
+          <div style="font-size:13px;font-weight:600">${escapeHtml(time)}</div>
+          <select onchange="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}',this.value)" style="min-width:0">
+            ${patientOptions.replace(`value="${escapeHtml(pid)}"`,`value="${escapeHtml(pid)}" selected`)}
+          </select>
+          <button class="btn btn-sm" title="この枠を空欄にする" onclick="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}','');renderBasicBookingTable()">×</button>
+        </div>`;
+      });
       html+='</div>';
-    });
+    }
     html+='</div>';
   });
-  if(!staffList.length) html='<div class="empty">担当者が登録されていません</div>';
   el.innerHTML=html;
 }
 
@@ -3581,25 +3601,28 @@ function escapeJs(v){return String(v??'').replace(/\\/g,'\\\\').replace(/'/g,"\\
 
 async function applyBasicBookingMonth(){
   const monthEl=document.getElementById('basic-booking-month');
+  const therapistEl=document.getElementById('basic-booking-reflect-therapist');
   const btn=document.getElementById('basic-booking-reflect-btn');
   const resultEl=document.getElementById('basic-booking-result');
   let ym=monthEl?.value||'';
+  const therapist=therapistEl?.value||'';
   if(!ym){
     const d=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
     ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if(monthEl)monthEl.value=ym;
   }
+  if(!therapist){showToast('担当者を選択してください','#FF9500');return;}
 
   const patterns=Object.entries(basicBookingPatterns)
     .map(([key,pid])=>{
-      const [therapist,dow,time]=key.split('|');
-      return {therapist,dow:Number(dow),time:normalizeTime(time),pid};
+      const [th,dow,time]=key.split('|');
+      return {therapist:th,dow:Number(dow),time:normalizeTime(time),pid};
     })
-    .filter(x=>x.pid&&patients[x.pid]&&!isArchivedPatient(x.pid));
+    .filter(x=>x.therapist===therapist&&x.pid&&patients[x.pid]&&!isArchivedPatient(x.pid));
 
-  if(!patterns.length){showToast('基本表に患者が登録されていません','#FF9500');return;}
+  if(!patterns.length){showToast(`${getStaffName(therapist)}の基本表に患者が登録されていません`,'#FF9500');return;}
 
-  if(!confirm(`${ym} の営業日の空き枠へ、基本表の患者を一括登録します。よろしいですか？`))return;
+  if(!confirm(`${getStaffName(therapist)}の基本表を${ym}に一括反映します。よろしいですか？`))return;
   if(btn){btn.disabled=true;btn.textContent='処理中...';}
   if(resultEl)resultEl.textContent='';
 
@@ -3639,14 +3662,14 @@ async function applyBasicBookingMonth(){
     }
   }
 
-  await dbAddNotification(`${ym} 基本表一括反映：${registered}件登録、既存${duplicate}件スキップ`,'admin');
-  await dbLog('admin','basic_booking_reflect',`${ym} 基本表一括反映：登録${registered} 既存${duplicate} 営業外${closed} 期限超過${limit} エラー${errorCount}`);
+  await dbAddNotification(`${getStaffName(therapist)} ${ym} 基本表一括反映：${registered}件登録、既存${duplicate}件スキップ`,'admin');
+  await dbLog('admin','basic_booking_reflect',`${getStaffName(therapist)} ${ym} 基本表一括反映：登録${registered} 既存${duplicate} 営業外${closed} 期限超過${limit} エラー${errorCount}`);
   await reloadBookings();
   renderWeekTable();
   renderTodaySchedule();
   renderNotifications();
 
-  const msg=`${ym}：${registered}件登録しました。既存予約${duplicate}件、営業外${closed}件、期限13単位上限${limit}件、登録失敗${errorCount}件。`;
+  const msg=`${getStaffName(therapist)} ${ym}：${registered}件登録しました。既存予約${duplicate}件、営業外${closed}件、期限13単位上限${limit}件、登録失敗${errorCount}件。`;
   if(resultEl)resultEl.textContent=msg;
   showToast(`${ym}の基本表一括反映が完了しました（${registered}件）`,'#34C759');
   if(btn){btn.disabled=false;btn.textContent='📅 指定月に一括反映する';}
