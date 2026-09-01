@@ -3522,26 +3522,16 @@ function basicBookingKey(therapist,dow,time){
 function getBasicBookingPid(therapist,dow,time){
   return basicBookingPatterns[basicBookingKey(therapist,dow,time)]||'';
 }
-async function setBasicBookingPid(therapist,dow,time,pid){
+function setBasicBookingPid(therapist,dow,time,pid){
   const key=basicBookingKey(therapist,dow,time);
   if(pid) basicBookingPatterns[key]=pid;
   else delete basicBookingPatterns[key];
-  await saveBasicBookingPatterns();
+  saveBasicBookingPatterns();
 }
 
-async function saveBasicBookingPatterns(){
-  // 基本表はDBのシステム設定に保存し、次回読み込み時も同じ患者を復元する。
-  // 保存完了を待つことで、選択直後に画面を閉じても未保存になりにくくする。
-  const raw=JSON.stringify(basicBookingPatterns);
-  window.__basicBookingPatternsRaw=raw;
-  try{
-    await dbSaveSetting('basic_booking_patterns',raw);
-    return true;
-  }catch(e){
-    console.error('基本表の保存に失敗しました',e);
-    showToast('基本表の保存に失敗しました。通信状態を確認してください。','#FF3B30');
-    return false;
-  }
+function saveBasicBookingPatterns(){
+  // 基本表はシステム設定に保存するため、ページを閉じても維持する。
+  dbSaveSetting('basic_booking_patterns',JSON.stringify(basicBookingPatterns));
 }
 
 function loadBasicBookingPatternsFromSettings(){
@@ -3571,14 +3561,8 @@ function renderBasicBookingTable(){
   populateBasicBookingTherapistSelects();
   const therapist=document.getElementById('basic-booking-therapist')?.value || staffList[0]?.id || '';
   const st=staffList.find(x=>x.id===therapist);
-  const activePatients=Object.entries(patients)
-    .filter(([id])=>!isArchivedPatient(id))
-    .sort((a,b)=>(a[1].kana||a[1].name||'').localeCompare(b[1].kana||b[1].name||'','ja'));
-  const patientOptions='<option value="">患者を選択</option>'+activePatients.map(([id,p])=>
-    `<option value="${escapeHtml(id)}">${escapeHtml(id)}：${escapeHtml(p.name||'')}</option>`).join('');
-
   if(!st){el.innerHTML='<div class="empty">担当者が登録されていません</div>';return;}
-  let html=`<div style="margin-bottom:4px;font-size:13px;color:#636366"><strong>${escapeHtml(st.name)}</strong> の基本表</div><div style="font-size:11px;color:#8E8E93;margin-bottom:10px">患者を選択・変更すると自動的に保存されます。次回開いたときも同じ患者が表示されます。</div>`;
+  let html=`<div style="margin-bottom:10px;font-size:13px;color:#636366"><strong>${escapeHtml(st.name)}</strong> の基本表</div>`;
   BASIC_BOOKING_DAYS.forEach(day=>{
     const times=slotDefsForDay(day.dow,st.id);
     html+=`<div style="padding:8px 10px;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:8px">
@@ -3589,12 +3573,14 @@ function renderBasicBookingTable(){
       html+='<div style="display:flex;flex-direction:column;gap:6px">';
       times.forEach(time=>{
         const pid=getBasicBookingPid(st.id,day.dow,time);
+        const pp=pid?patients[pid]:null;
+        const label=pp
+          ? `${escapeHtml(pp.name||'')}<span style="font-size:11px;color:#8E8E93;margin-left:6px">${escapeHtml(pp.kana||pp.furigana||'')} ／ ${escapeHtml(pid)}</span>`
+          : '患者を選択';
         html+=`<div style="display:grid;grid-template-columns:70px 1fr 42px;gap:8px;align-items:center">
           <div style="font-size:13px;font-weight:600">${escapeHtml(time)}</div>
-          <select onchange="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}',this.value)" style="min-width:0">
-            ${patientOptions.replace(`value="${escapeHtml(pid)}"`,`value="${escapeHtml(pid)}" selected`)}
-          </select>
-          <button class="btn btn-sm" title="この枠を空欄にする" onclick="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}','').then(()=>renderBasicBookingTable())">×</button>
+          <button type="button" class="btn" style="text-align:left;min-width:0;background:#fff;border:1px solid #D1D1D6;color:#1C1C1E" onclick="openBasicBookingPatientPicker('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}')">${label}</button>
+          <button class="btn btn-sm" title="この枠を空欄にする" onclick="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}','');renderBasicBookingTable()">×</button>
         </div>`;
       });
       html+='</div>';
@@ -3602,6 +3588,54 @@ function renderBasicBookingTable(){
     html+='</div>';
   });
   el.innerHTML=html;
+}
+
+// 基本表の患者登録は、週間表の代理予約と同じ患者選択モーダル方式にする。
+let basicBookingPickerKey=null;
+function openBasicBookingPatientPicker(therapist,dow,time){
+  basicBookingPickerKey={therapist,dow,time};
+  const current=getBasicBookingPid(therapist,dow,time);
+  const currentPatient=current?patients[current]:null;
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">📅 代理予約 ― 患者を選択</div>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">担当：${escapeHtml(getStaffName(therapist))} ／ ${escapeHtml(DAY_NAMES[dow])} ／ ${escapeHtml(time)}</p>
+    ${currentPatient?`<div style="background:#F5F5F7;border-radius:10px;padding:9px 11px;margin-bottom:10px;font-size:12px">現在：<strong>${escapeHtml(currentPatient.name||'')}</strong>　${escapeHtml(currentPatient.kana||currentPatient.furigana||'')} ／ ${escapeHtml(current)}</div>`:''}
+    <div class="input-group">
+      <label>患者を検索（患者ID・漢字・カタカナ・ふりがな）</label>
+      <input type="text" id="basic-patient-search" placeholder="例：山田 / ヤマダ / やまだ / ft900001" autocomplete="off" oninput="basicSearchPatient(this.value)">
+    </div>
+    <div id="basic-patient-results" style="max-height:300px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:12px"></div>
+    <button type="button" class="btn btn-block" onclick="selectBasicBookingPatient('')">患者を登録しない（空欄）</button>`);
+  basicSearchPatient('');
+}
+function basicSearchPatient(query){
+  const el=document.getElementById('basic-patient-results');
+  if(!el)return;
+  const q=String(query||'').trim().toLocaleLowerCase('ja');
+  let matched=Object.entries(patients).filter(([id])=>!isArchivedPatient(id));
+  if(q){
+    matched=matched.filter(([id,p])=>{
+      const hay=[id,p.name,p.kana,p.furigana].filter(Boolean).join(' ').toLocaleLowerCase('ja');
+      return hay.includes(q);
+    });
+  }
+  matched.sort((a,b)=>(a[1].kana||a[1].furigana||a[1].name||'').localeCompare(b[1].kana||b[1].furigana||b[1].name||'','ja'));
+  if(!matched.length){
+    el.innerHTML='<div style="padding:14px;font-size:13px;color:#8E8E93">該当する患者が見つかりません</div>';
+    return;
+  }
+  el.innerHTML=matched.slice(0,100).map(([id,p])=>`<button type="button" onclick="selectBasicBookingPatient('${escapeJs(id)}')" style="display:block;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid #F2F2F7;padding:11px 14px;cursor:pointer">
+    <div style="font-weight:600;font-size:14px">${escapeHtml(p.name||'')}</div>
+    <div style="font-size:11px;color:#8E8E93">${escapeHtml(p.kana||p.furigana||'')} ／ ${escapeHtml(id)}${p.therapist?' ／ '+escapeHtml(getStaffName(p.therapist)):''}</div>
+  </button>`).join('')+(matched.length>100?'<div style="padding:8px;font-size:11px;color:#8E8E93">さらに絞り込んでください</div>':'');
+}
+function selectBasicBookingPatient(pid){
+  if(!basicBookingPickerKey)return;
+  const {therapist,dow,time}=basicBookingPickerKey;
+  setBasicBookingPid(therapist,dow,time,pid);
+  basicBookingPickerKey=null;
+  closeModal();
+  renderBasicBookingTable();
 }
 
 function escapeHtml(v){
