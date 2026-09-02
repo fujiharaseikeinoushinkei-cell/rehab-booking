@@ -92,6 +92,9 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .notif-body{flex:1;font-size:13px;line-height:1.5}
 .notif-time{font-size:11px;color:#8E8E93;margin-top:2px}
 .notif-dismiss{font-size:20px;color:#C7C7CC;cursor:pointer;padding:0 4px;min-width:32px;text-align:center}
+.notif-approve{font-size:12px;color:#fff;background:#007AFF;border:none;border-radius:8px;padding:7px 10px;cursor:pointer;min-width:56px;font-family:inherit;font-weight:600}
+.notif-approve:disabled{background:#D1D1D6;color:#fff;cursor:default}
+.notif-approved{font-size:12px;color:#34C759;background:#EAF9EF;border:1px solid #B7E8C7;border-radius:8px;padding:6px 8px;white-space:nowrap}
 .th-btn{padding:9px 18px;border-radius:10px;border:1px solid #D1D1D6;cursor:pointer;font-size:14px;font-family:inherit;background:#fff;color:#1C1C1E;font-weight:500;min-height:44px}
 .th-btn.active-t{background:#E0F0FF;border-color:#007AFF;color:#0056CC;font-weight:600}
 .th-btn.active-f{background:#EDE8FF;border-color:#7C5CBF;color:#5E35B1;font-weight:600}
@@ -272,7 +275,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 <div id="s-patient" class="screen">
   <div class="nav">
     <div><div class="nav-title" id="p-welcome">患者さん</div><div class="nav-sub" id="p-id-sub"></div></div>
-    <button class="btn btn-sm" onclick="showScreen('s-top')">戻る</button>
+    <button class="btn btn-sm" onclick="setActor('system');currentPid=null;showScreen('s-top')">戻る</button>
   </div>
   <div id="p-banner" style="padding:8px 16px 0"></div>
   <div class="tab-bar" id="p-tabs">
@@ -309,7 +312,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 <div id="s-admin" class="screen">
   <div class="nav">
     <div><div class="nav-title">管理者ダッシュボード</div><div class="nav-sub" id="admin-date-sub"></div></div>
-    <button class="btn btn-sm" onclick="showScreen('s-top')">戻る</button>
+    <button class="btn btn-sm" onclick="setActor('system');showScreen('s-top')">戻る</button>
   </div>
   <div style="background:#fff;border-bottom:1px solid #E5E5EA">
     <div class="admin-menu-grid">
@@ -2205,7 +2208,25 @@ function renderMyBook(){
   const upcoming=getPatientUpcoming(currentPid);
   const el=document.getElementById('ptab-mybook');
   if(!el)return;
-  let html='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
+
+  // 管理者が承認した「キャンセル・追加」の確認メッセージを、現在の予約一覧の上に表示する。
+  const staffReplies=notifications
+    .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n))
+    .map(n=>({id:n.id,text:String(n.text).split(STAFF_REPLY_MARK)[1]?.trim()||'',time:n.time}))
+    .filter(x=>x.text)
+    .slice(0,10);
+
+  let html='';
+  if(staffReplies.length){
+    html+=`<div style="margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>
+      ${staffReplies.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px">
+        <div style="font-size:14px;line-height:1.6">${r.text}</div>
+        <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div>
+      </div>`).join('')}
+    </div>`;
+  }
+  html+='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
   if(!upcoming.length){
     html+=`<div class="empty">📅 現在、予約はありません</div>
     <div style="margin-top:16px">
@@ -2493,6 +2514,37 @@ function getCurrentActor(){
 }
 let notifShowCount={patient:5,admin:5};
 
+// ---- 患者からの予約変更・担当者承認 ----
+// DBの既存 notifications テーブルだけで完結させるため、承認内容をmessage末尾に保存する。
+// 追加のDBカラム／テーブルは使用しない。
+const STAFF_REPLY_MARK='\n【担当者より】';
+function isPatientBookingChange(n){
+  if(!n || !n.operator || n.operator==='admin')return false;
+  const patientIds=new Set(Object.keys(patients||{}).map(String));
+  if(!patientIds.has(String(n.operator)))return false;
+  const msg=String(n.text||'');
+  return msg.includes('キャンセル') || msg.includes('に予約');
+}
+function getOriginalNotificationText(n){
+  return String(n?.text||'').split(STAFF_REPLY_MARK)[0].trim();
+}
+function getStaffReplyText(n){
+  const msg=getOriginalNotificationText(n);
+  // キャンセル：例「内藤 武子（nt12466）が 9/13 16:10 をキャンセル（理由：...）」
+  let m=msg.match(/(?:が\s+)?(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})\s+をキャンセル/);
+  if(m)return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　キャンセル　確認しました。`;
+  // 追加：例「内藤 武子（nt12466）が 9月13日（火）16:10（PT 田中）に予約」
+  m=msg.match(/(?:が\s+)(\d{1,2})月(\d{1,2})日(?:（[^）]*）)?\s+(\d{1,2}:\d{2})/);
+  if(m && msg.includes('に予約'))return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　追加　確認しました。`;
+  // 将来の表記揺れに備えたフォールバック
+  m=msg.match(/(?:が\s+)(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})/);
+  if(m && msg.includes('予約'))return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　追加　確認しました。`;
+  return '予約変更を確認しました。';
+}
+function isApprovedNotification(n){
+  return String(n?.text||'').includes(STAFF_REPLY_MARK);
+}
+
 function renderNotifications(){
   const el=document.getElementById('notif-list');
   const empty=document.getElementById('notif-empty');
@@ -2508,11 +2560,26 @@ function renderNotifications(){
   function buildList(list,type,showCount){
     if(!list.length)return`<div style="font-size:12px;color:#C7C7CC;padding:8px 0;text-align:center">なし</div>`;
     const showing=list.slice(0,showCount);
-    let html=showing.map(n=>`<div class="notif-item" id="ni-${n.id}">
-      <div class="notif-dot"></div>
-      <div class="notif-body">${n.text}<div class="notif-time">${n.time}</div></div>
-      <div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>
-    </div>`).join('');
+    let html=showing.map(n=>{
+      const approved=isApprovedNotification(n);
+      const change=isPatientBookingChange(n);
+      const displayText=getOriginalNotificationText(n);
+      let action='';
+      if(type==='patient' && change){
+        action=approved
+          ? `<div class="notif-approved">承認済</div>`
+          : `<button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button>`;
+      }else if(type==='admin'){
+        action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
+      }else{
+        action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
+      }
+      return `<div class="notif-item" id="ni-${n.id}">
+        <div class="notif-dot"></div>
+        <div class="notif-body">${displayText}<div class="notif-time">${n.time}</div></div>
+        ${action}
+      </div>`;
+    }).join('');
     const remaining=Math.min(list.length-showCount,20-showCount);
     if(remaining>0){
       html+=`<div style="text-align:center;padding:8px 0">
@@ -2533,6 +2600,25 @@ function renderNotifications(){
 function notifShowMore(type){
   notifShowCount[type]=Math.min(notifShowCount[type]+5,20);
   renderNotifications();
+}
+
+async function approvePatientChange(id){
+  if(getCurrentActor()!=='admin'){showToast('管理者ログイン中のみ承認できます');return;}
+  const n=notifications.find(x=>Number(x.id)===Number(id));
+  if(!n || !isPatientBookingChange(n)){showToast('承認対象の予約変更が見つかりません');return;}
+  if(isApprovedNotification(n)){showToast('すでに承認済みです');return;}
+  const reply=getStaffReplyText(n);
+  const original=getOriginalNotificationText(n);
+  const updatedMessage=`${original}${STAFF_REPLY_MARK}${reply}`;
+  const {data,error}=await sb.from('notifications').update({message:updatedMessage}).eq('id',id).select().single();
+  if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
+  n.text=data?.message||updatedMessage;
+  // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
+  await dbLog('admin','approve_patient_change',`${n.operator}：${reply}`);
+  renderNotifications();
+  // 患者側が同じ端末で開いている場合にも即時反映
+  if(currentPid===String(n.operator))renderMyBook();
+  showToast('予約変更を承認しました','#34C759');
 }
 
 async function dismissNotif(id){
