@@ -77,12 +77,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .cal-cell.holiday-cell{background:#FFE0E0;color:#B00020}
 .cal-cell.today{background:#007AFF;color:#fff;border-radius:50%}
 .cal-cell.selected{outline:2px solid #007AFF}
-.top-cal-cell{font-size:12px;text-align:center;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:36px;display:flex;align-items:center;justify-content:center;font-weight:500;flex-direction:column;gap:1px}
-.top-cal-cell.other{color:#C7C7CC;font-weight:400;cursor:default}
-.top-cal-cell.open-day{background:#D1F0DF;color:#1A7F47}
-.top-cal-cell.closed-day{background:#FFE0E0;color:#B00020;cursor:default}
-.top-cal-cell.today{outline:2px solid #007AFF;outline-offset:-2px}
-.top-cal-cell.selected{box-shadow:inset 0 0 0 2px #007AFF}
 .sched-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #F2F2F7;min-height:44px}
 .sched-time{font-size:12px;color:#8E8E93;min-width:38px}
 .sched-name{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -216,25 +210,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <span>空き状況の確認・予約の追加はこちら</span>
       <span style="font-size:12px;color:#8E8E93;font-weight:400">担当を選んで空き枠を確認</span>
     </button>
-    <div id="top-availability-calendar" class="card" style="margin-top:12px;padding:12px;text-align:left">
-      <div style="font-size:14px;font-weight:700;text-align:center;margin-bottom:4px">📅 リハビリ空き状況カレンダー</div>
-      <div style="font-size:11px;color:#8E8E93;text-align:center;margin-bottom:8px">空きがある日付に色がついています。日付をクリックするとその日の予約画面へ移動します。</div>
-      <div id="top-cal-start" style="text-align:center;padding:8px 4px 4px">
-        <button class="btn btn-block" onclick="topCalShow()" style="min-width:120px;background:#fff;color:#000;border:1px solid #C7C7CC;box-shadow:none">表示</button>
-      </div>
-      <div id="top-cal-content" style="display:none">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <button class="btn btn-sm" onclick="topCalNav(-1)">‹</button>
-          <span id="top-cal-label" style="flex:1;text-align:center;font-size:14px;font-weight:600"></span>
-          <button class="btn btn-sm" onclick="topCalNav(1)">›</button>
-        </div>
-        <div id="top-cal-grid"></div>
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#8E8E93">
-          <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#D1F0DF;vertical-align:-2px;margin-right:3px"></span>空きあり</span>
-          <span><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#FFE0E0;vertical-align:-2px;margin-right:3px"></span>休診</span>
-        </div>
-      </div>
-    </div>
     <button class="btn btn-block" onclick="showScreen('s-admin-login')" style="font-size:15px;padding:14px;color:#8E8E93">
       🔒 管理者ログイン
     </button>
@@ -437,45 +412,47 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="patient-list"></div>
   </div>
 
-  <!-- 基本表（旧「過去の予約を指定の月に反映」は削除） -->
+  <!-- 代理予約 -->
   <div class="pad pt-12" id="atab-booking" style="display:none">
-    <div class="card" style="background:#F5F5F7;border-color:#D1D1D6;margin-bottom:12px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:6px">📋 基本表</div>
-      <p style="font-size:12px;color:#636366;line-height:1.6;margin:0">
-        「枠設定」に登録されている担当者・曜日・時間を基本表として、各予約枠に患者を設定します。
-        「〇月に一括反映する」を押すと、指定月の営業日で空いている同じ曜日・時間の枠へ自動登録します。
-      </p>
+    <!-- 月一括反映 -->
+    <div class="card" style="background:#EDE8FF;border-color:#7C5CBF;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px;color:#5E35B1">📋 過去の予約を指定の月に反映</div>
+      <p style="font-size:12px;color:#5E35B1;margin-bottom:10px;line-height:1.6">「参照する月」の予約パターン（曜日・時間）を、「反映先の月」の対応する曜日・時間に一括予約します。</p>
+      <div class="input-group" style="margin-bottom:10px">
+        <label style="color:#5E35B1">参照する月を選択</label>
+        <input type="month" id="prev-month-select" style="border-color:#7C5CBF" onchange="updatePrevMonthReflectLabel()">
+      </div>
+      <div class="input-group" style="margin-bottom:10px">
+        <label style="color:#5E35B1">反映先の月を選択</label>
+        <input type="month" id="target-month-select" style="border-color:#7C5CBF" onchange="updatePrevMonthReflectLabel()">
+      </div>
+      <button class="btn btn-block" style="background:#5E35B1;color:#fff;border-color:#5E35B1" id="prev-month-reflect-btn" onclick="openPrevMonthReflect()">🔁 一括反映する</button>
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-        <div style="font-size:14px;font-weight:700">担当者別・曜日別 基本表</div>
-        <button class="btn btn-sm" onclick="renderBasicBookingTable()">↻ 更新</button>
-      </div>
-      <div class="input-group" style="margin-bottom:12px">
-        <label>担当者</label>
-        <select id="basic-booking-therapist" onchange="renderBasicBookingTable()"></select>
-      </div>
-      <div id="basic-booking-table"></div>
-    </div>
-    <div class="card" style="background:#E8F4FF;border-color:#B3D4FF">
-      <div style="font-size:14px;font-weight:700;color:#004494;margin-bottom:8px">📅 基本表を指定月へ一括反映</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div class="input-group">
-          <label>担当者</label>
-          <select id="basic-booking-reflect-therapist"></select>
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px">患者IDで代理予約</div>
+      <div class="input-group"><label>患者ID</label><select id="bk-pid" onchange="loadBookingPatient()"><option value="">患者を選択</option></select></div>
+      <div id="bk-info" style="display:none;background:#F5F5F7;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:#8E8E93"></div>
+      <div id="bk-slot-sec" style="display:none">
+        <div style="font-size:13px;font-weight:600;color:#8E8E93;margin-bottom:6px">空き枠を選択</div>
+        <div class="input-group" style="margin-bottom:8px">
+          <label>週を選択</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm" onclick="bkWeekNav(-1)">‹</button>
+            <span id="bk-week-label" style="flex:1;text-align:center;font-size:13px;font-weight:600"></span>
+            <button class="btn btn-sm" onclick="bkWeekNav(1)">›</button>
+          </div>
         </div>
-        <div class="input-group">
-          <label>反映する月</label>
-          <input type="month" id="basic-booking-month">
+        <div id="bk-slots" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div class="input-group" style="margin-top:12px">
+          <label>🔁 次回予約の自動提案（毎週固定）</label>
+          <select id="bk-auto">
+            <option value="">なし（今回のみ）</option>
+            <option value="weekly">毎週同じ曜日・時間で自動登録</option>
+          </select>
         </div>
+        <div class="input-group"><label>備考</label><input type="text" id="bk-note" placeholder="任意"></div>
+        <button class="btn btn-green btn-block" onclick="doAdminBooking()">✔ 予約を確定する</button>
       </div>
-      <div class="notice" style="margin-bottom:10px;line-height:1.6">
-        選択した<strong>担当者</strong>の基本表を、指定月の営業日に一括反映します。
-        基本表と同じ曜日・時間で、実際に営業していて空いている枠だけに登録します。
-        休診日・担当者の休暇・既に予約が入っている枠はスキップします。
-      </div>
-      <button class="btn btn-primary btn-block" id="basic-booking-reflect-btn" onclick="applyBasicBookingMonth()">📅 指定月に一括反映する</button>
-      <div id="basic-booking-result" style="font-size:12px;color:#636366;margin-top:10px"></div>
     </div>
   </div>
 
@@ -655,10 +632,8 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         本来休診の日（日曜・第1/3週の木土など）でも、特定の日付・担当・時間だけ臨時で営業させたい場合に登録します。登録した時間は、週間表・患者予約画面などで通常の枠と同じように予約できるようになります。
       </p>
       <div class="input-group"><label>臨時営業日</label><input type="date" id="sp-date"></div>
-      <div class="input-group"><label>担当者</label><select id="sp-th"></select></div>
-      <div class="input-group"><label>開始時間</label><input type="time" id="sp-time" value="09:00" step="1200"></div>
-      <div class="input-group"><label>終了時間</label><input type="time" id="sp-end-time" value="09:40" step="1200"></div>
-      <p style="font-size:11px;color:#8E8E93;margin-top:-4px;margin-bottom:10px;line-height:1.5">開始時間〜終了時間を臨時営業として登録します。時間は20分単位で設定し、20分＝1単位として処理します。例：16:00〜17:00＝60分・3単位。既存予約と時間が重なる部分は登録できません。</p>
+      <div class="input-group"><label>担当</label><select id="sp-th"></select></div>
+      <div class="input-group"><label>時間</label><input type="time" id="sp-time" value="9:10"></div>
       <button class="btn btn-primary btn-block" onclick="addSpecialDay()">追加する</button>
       <p id="sp-err" style="font-size:13px;color:#FF3B30;margin-top:8px;display:none"></p>
     </div>
@@ -753,10 +728,6 @@ let schedTherapist="",schedView="day",schedOffset=0;
 let calYear=TODAY.getFullYear(),calMonth=TODAY.getMonth(),calSelected=null;
 let adminBookSelected=null,bkWeekOffset=0,pubWeekOffset=0;
 let pubTherapist=null;
-let pubTargetDate=null;
-let topCalYear=TODAY.getFullYear(),topCalMonth=TODAY.getMonth();
-let topCalBookings={};
-let loadErrors=[];
 let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
 
 // ---- スタッフ（担当PT）管理 ----
@@ -1095,12 +1066,11 @@ let rehabBillingStartDates = {};
 async function saveRehabBillingStartDates(){
   await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
 }
-function calcRehabDeadline(startDate){
-  if(!startDate)return '';
-  const d=parseLocalDate(startDate);
-  if(Number.isNaN(d.getTime())) return '';
+function calcRehabDeadline(dateStr){
+  if(!dateStr)return '';
+  const d=parseLocalDate(dateStr);
   d.setDate(d.getDate()+150);
-  return window.dateStr(d);
+  return dateStr(d);
 }
 async function saveRehabStartDates(){
   await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
@@ -1114,71 +1084,25 @@ async function saveArchivedPatientIds(){
 }
 
 // ---- LOAD ----
-async function safeDbQuery(label, queryFactories){
-  const factories=Array.isArray(queryFactories)?queryFactories:[queryFactories];
-  let lastError=null;
-  for(let i=0;i<factories.length;i++){
-    try{
-      const res=await factories[i]();
-      if(!res?.error)return res;
-      lastError=res.error;
-      console.warn(`[DB] ${label} query${i+1} failed`,res.error);
-    }catch(e){
-      lastError=e;
-      console.warn(`[DB] ${label} query${i+1} exception`,e);
-    }
-  }
-  console.error(`[DB] ${label} all queries failed`,lastError);
-  loadErrors.push({label,error:lastError});
-  return {data:null,error:lastError};
-}
-
-// ---- LOAD ----
 async function loadAllData(){
-  // 初期データは「1つのテーブルの失敗でloadAllData全体がthrowする」ことがないよう、
-  // テーブル単位で安全に取得する。DBの列名はselect('*')で取得し、任意列はJS側で補正する。
-  loadErrors=[];
+  // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  async function getRows(label, factory){
-    try{
-      const res=await factory();
-      if(res && !res.error){
-        return Array.isArray(res.data)?res.data:[];
-      }
-      const err=res?.error||new Error('データが返されませんでした');
-      console.error(`[DB] ${label} 取得失敗`,err);
-      loadErrors.push({label,error:err});
-      return [];
-    }catch(e){
-      console.error(`[DB] ${label} 取得例外`,e);
-      loadErrors.push({label,error:e});
-      return [];
-    }
-  }
-
-  const [
-    settingsRows,
-    slotRows,
-    holidayRows,
-    leaveRows,
-    patientRows,
-    bookingRows,
-    notificationRows,
-    specialRows
-  ]=await Promise.all([
-    getRows('設定',()=>sb.from('system_settings').select('*')),
-    getRows('枠設定',()=>sb.from('slot_definitions').select('*')),
-    getRows('休診日',()=>sb.from('holidays').select('*')),
-    getRows('PT休暇',()=>sb.from('therapist_leaves').select('*')),
-    getRows('患者',()=>sb.from('patients').select('*')),
-    getRows('予約',()=>sb.from('bookings').select('*').gte('booking_date',from).lte('booking_date',to)),
-    getRows('お知らせ',()=>sb.from('notifications').select('*').limit(100)),
-    getRows('臨時営業日',()=>sb.from('special_business_days').select('*'))
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
+    sb.from('system_settings').select('*'),
+    sb.from('slot_definitions').select('*').eq('is_active',true),
+    sb.from('holidays').select('holiday_date,label,period'),
+    sb.from('therapist_leaves').select('*'),
+    sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
+    sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
+      .gte('booking_date',from).lte('booking_date',to),
+    sb.from('notifications').select('id,message,created_at,operator')
+      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
+    sb.from('special_business_days').select('*'),
   ]);
 
   // settings
-  settingsRows.forEach(r=>{
+  (srRes.data||[]).forEach(r=>{
     if(r.key==='clinic_name')clinicName=r.value;
     if(r.key==='top_subtitle_text')topSubtitleText=r.value;
     if(r.key==='clinic_phone')clinicPhone=r.value;
@@ -1189,140 +1113,100 @@ async function loadAllData(){
     if(r.key==='reception_time_end')settings.tend=r.value;
     if(r.key==='business_hours_matrix'){
       try{
-        const parsed=JSON.parse(r.value||'{}');
-        if(parsed&&typeof parsed==='object')businessHoursMatrix=Object.assign(defaultBusinessHoursMatrix(),parsed);
-      }catch(e){console.warn('営業時間設定の解析に失敗しました',e);}
+        const parsed=JSON.parse(r.value);
+        // デフォルトとマージ（新しい曜日・週パターンが増えても欠損しないように）
+        businessHoursMatrix=Object.assign(defaultBusinessHoursMatrix(),parsed);
+      }catch(e){console.warn('営業時間設定の読み込みに失敗しました',e);}
     }
     if(r.key==='staff_list'){
       try{
-        const parsed=JSON.parse(r.value||'[]');
+        const parsed=JSON.parse(r.value);
         if(Array.isArray(parsed)&&parsed.length)staffList=parsed;
-      }catch(e){console.warn('スタッフ一覧の解析に失敗しました',e);}
+      }catch(e){console.warn('スタッフ一覧の読み込みに失敗しました',e);}
     }
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
-    if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
     if(r.key==='archived_patient_ids'){
       try{
         const parsed=JSON.parse(r.value||'[]');
         archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
-      }catch(e){archivedPatientIds=new Set();}
+      }catch(e){ archivedPatientIds=new Set(); }
     }
     if(r.key==='patient_rehab_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         rehabStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){rehabStartDates={};}
+      }catch(e){ rehabStartDates={}; }
     }
     if(r.key==='patient_care_insurance'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         careInsurancePatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){careInsurancePatients={};}
+      }catch(e){ careInsurancePatients={}; }
     }
     if(r.key==='patient_rehab_billing_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
         rehabBillingStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){rehabBillingStartDates={};}
+      }catch(e){ rehabBillingStartDates={}; }
     }
-    if(r.key==='last_updated'&&r.value){
+    if(r.key==='last_updated'){
       try{
         const d=new Date(r.value);
-        if(!Number.isNaN(d.getTime())){
-          const el=document.getElementById('last-updated-footer');
-          if(el)el.textContent=d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 更新';
-        }
+        document.getElementById('last-updated-footer').textContent=
+          d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+
+          d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 更新';
       }catch(e){}
     }
   });
 
-  loadBasicBookingPatternsFromSettings();
+  // slot definitions
+  slotDefs=sdRes.data||[];
 
-  // DBの実際の行をJSの既存構造へ変換
-  slotDefs=slotRows.filter(s=>s.is_active===undefined||s.is_active===true);
-  holidayData=holidayRows.filter(h=>h&&h.holiday_date);
+  // holidays
+  holidayData=hdRes.data||[];
   holidays=new Set(holidayData.filter(h=>(h.period||'full')==='full').map(h=>h.holiday_date));
 
+  // therapist leaves
   leaves={};
-  staffList.forEach(st=>{leaves[st.id]=new Set();});
+  staffList.forEach(s=>leaves[s.id]=new Set());
   leaveData=[];
-  leaveRows.forEach(l=>{
-    if(!l||!l.therapist||!l.leave_date)return;
+  (ldRes.data||[]).forEach(l=>{
     if(!leaves[l.therapist])leaves[l.therapist]=new Set();
     leaves[l.therapist].add(l.leave_date);
     leaveData.push(l);
   });
 
+  // patients
   patients={};
-  patientRows.forEach(p=>{
-    if(!p||p.id==null)return;
-    const pid=String(p.id);
-    let deadline;
-    if(rehabBillingStartDates[pid]){
-      const ds=calcRehabDeadline(rehabBillingStartDates[pid]);
-      deadline=ds?parseLocalDate(ds):new Date('2025-12-31');
-    }else if(p.deadline){
-      const pd=new Date(p.deadline);
-      deadline=Number.isNaN(pd.getTime())?new Date('2025-12-31'):pd;
-    }else{
-      deadline=new Date('2025-12-31');
-    }
-    patients[pid]={
-      name:p.name||'',
-      kana:p.kana||'',
-      dob:p.dob||'',
-      gender:p.gender||'男',
-      disease:p.disease||'',
-      therapist:p.therapist||(staffList[0]?.id||''),
-      deadline,
-      rehabStartDate:rehabStartDates[pid]||'',
-      rehabBillingStartDate:rehabBillingStartDates[pid]||'',
-      careInsurance:!!careInsurancePatients[pid],
-      note:p.note||'',
-      history:[]
-    };
+  (pdRes.data||[]).forEach(p=>{
+    patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
+      disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
+      deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
+      rehabStartDate:rehabStartDates[String(p.id)]||'',
+      careInsurance:!!careInsurancePatients[String(p.id)],
+      note:p.note||'',history:[]};
   });
 
+  // bookings
   bookings={};bookingStatuses={};bookingUnits={};
-  bookingRows.forEach(b=>{
-    if(!b||!b.booking_date||!b.therapist||!b.time_slot)return;
-    const ds=b.booking_date,th=b.therapist,t=normalizeTime(b.time_slot);
-    if(!bookings[ds])bookings[ds]={};
-    if(!bookingStatuses[ds])bookingStatuses[ds]={};
-    if(!bookingUnits[ds])bookingUnits[ds]={};
-    if(!bookings[ds][th])bookings[ds][th]={};
-    if(!bookingStatuses[ds][th])bookingStatuses[ds][th]={};
-    if(!bookingUnits[ds][th])bookingUnits[ds][th]={};
-    bookings[ds][th][t]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
-    bookingStatuses[ds][th][t]=b.status||'reserved';
-    bookingUnits[ds][th][t]=Number(b.unit||2);
+  (brRes.data||[]).forEach(b=>{
+    if(!bookings[b.booking_date])bookings[b.booking_date]={};
+    if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
+    if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
+    if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
+    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
+    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
 
-  notifications=notificationRows
-    .filter(n=>n && (n.dismissed===undefined||n.dismissed===false))
-    .sort((a,b)=>{
-      const ta=a.created_at?new Date(a.created_at).getTime():0;
-      const tb=b.created_at?new Date(b.created_at).getTime():0;
-      return tb-ta;
-    })
-    .slice(0,40)
-    .map(n=>({
-      id:n.id,
-      text:n.message||'',
-      time:fmtTime(n.created_at),
-      operator:n.operator||'patient'
-    }));
+  // notifications
+  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
 
-  specialDays=specialRows
-    .filter(s=>s&&s.special_date&&s.time_slot)
-    .map(s=>({...s,time_slot:normalizeTime(s.time_slot)}));
-
-  // 取得失敗がある場合でも、ここではthrowしない。
-  // アプリは起動し、失敗したテーブルだけ後から再読込できる。
-  if(loadErrors.length){
-    console.warn('初期データ取得失敗:',loadErrors.map(x=>x.label));
-  }
+  // 臨時営業日
+  specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot)})):[];
 }
 
 function fmtTime(iso){
@@ -1363,45 +1247,24 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   if(exErr) console.warn('重複チェックエラー',exErr);
 
   // 取得結果の時間を正規化して比較し、同じ枠の既存行を探す
-  const rows=(exRows||[]).map(r=>({...r,time_slot:normalizeTime(r.time_slot)}));
-  const existing=rows.find(r=>r.time_slot===normTime);
-  console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:rows.map(r=>({t:r.time_slot,s:r.status,u:r.unit}))});
+  const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
+  console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
 
-  // 3単位（60分）は「20分刻みの3区間」を連続して占有する。
-  // 枠設定そのものは40分単位の開始枠で登録されているため、
-  // 8:30→8:50→9:10のように「中間の20分」がslotDefsに存在しないケースでも
-  // 正常に登録できるよう、開始時刻から60分の時間帯と既存予約の実時間が重なるかで判定する。
-  if(unit===3){
-    const startMin=timeMins(normTime);
-    const endMin=startMin+60;
-    const occupied=rows.filter(r=>{
-      if(!['reserved','noshow','done'].includes(r.status))return false;
-      const rStart=timeMins(r.time_slot);
-      const rUnit=Number(r.unit||2);
-      const rEnd=rStart+(rUnit===3?60:(rUnit===1?20:40));
-      return startMin<rEnd && rStart<endMin;
-    });
-    if(occupied.length){
-      const hit=occupied[0];
-      const existName=hit.patient_id&&patients[hit.patient_id]?patients[hit.patient_id].name:'別の患者';
-      const reasonLabel=hit.status==='noshow'?'（来なかった扱い）':hit.status==='done'?'（実施済み）':'';
-      const endTime=normalizeTime(addMinutesToTime(normTime,60));
-      return{ok:false,reason:`3単位（60分）に必要な時間帯（${normTime}〜${endTime}）の一部が${existName}さん${reasonLabel}で使用中です。別の時間をお選びください。`};
-    }
-  }else if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
-    const existName=existing.patient_id&&patients[existing.patient_id]?patients[existing.patient_id].name:'別の患者';
+  // すでに「予約済み（reserved）」「実施済み（done）」「来なかった（noshow）」の行があれば拒否
+  if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
+    const existName=existing.patient_id&&patients[existing.patient_id]
+      ?patients[existing.patient_id].name:'別の患者';
     const reasonLabel=existing.status==='noshow'?'（来なかった扱い）':existing.status==='done'?'（実施済み）':'';
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さん${reasonLabel}が使用中です。別の時間をお選びください。`};
   }
 
-  // 算定期限超過後は、当月13単位を上限とする。
-  // DB上の予約を直接集計するため、過去データ取得範囲やローカルキャッシュに依存しない。
+  // 月6回チェック（期限切れ患者のみ）
   if(isOverDeadline(pid)){
     const ym=date.substring(0,7);
-    const usedUnits=await countMonthlyBookingUnits(pid,ym);
-    if(usedUnits+Number(unit||2)>13){
-      const m=parseInt(ym.split('-')[1],10);
-      return{ok:false,reason:`${m}月はリハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`};
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      const m=parseInt(ym.split('-')[1]);
+      return{ok:false,reason:`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`};
     }
   }
 
@@ -1492,36 +1355,43 @@ async function resolvePatientName(pid){
 // bookingsのみ再読み込み（キャッシュ更新）
 async function reloadBookings(){
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
-  const {data:br,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to);
-  if(error){
-    console.error('bookingsリロード失敗',error);
-    showToast('予約データの更新に失敗しました。現在の表示を保持します。','#B00020');
-    return false;
-  }
-  const nextBookings={},nextStatuses={},nextUnits={};
+  const {data:br}=await sb.from('bookings')
+    .select('booking_date,time_slot,therapist,patient_id,status,unit')
+    .gte('booking_date',from).lte('booking_date',to);
+  bookings={};bookingStatuses={};bookingUnits={};
   (br||[]).forEach(b=>{
-    if(!nextBookings[b.booking_date])nextBookings[b.booking_date]={};
-    if(!nextStatuses[b.booking_date])nextStatuses[b.booking_date]={};
-    if(!nextUnits[b.booking_date])nextUnits[b.booking_date]={};
-    if(!nextBookings[b.booking_date][b.therapist])nextBookings[b.booking_date][b.therapist]={};
-    if(!nextStatuses[b.booking_date][b.therapist])nextStatuses[b.booking_date][b.therapist]={};
-    if(!nextUnits[b.booking_date][b.therapist])nextUnits[b.booking_date][b.therapist]={};
+    if(!bookings[b.booking_date])bookings[b.booking_date]={};
+    if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
+    if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
+    if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
-    nextBookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
-    nextStatuses[b.booking_date][b.therapist][normSlot]=b.status;
-    nextUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
+    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
+    bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
-  bookings=nextBookings;bookingStatuses=nextStatuses;bookingUnits=nextUnits;
   console.log('bookingsリロード完了',bookings);
-  return true;
 }
 
-async function dbAddNotification(text,operator='system'){
-  if(String(text||'').includes('【管理者】')) operator='admin';
-  const {data,error}=await sb.from('notifications').insert({message:text,operator}).select().single();
-  if(error)return;
-  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator||operator});
-  await sb.from('operation_logs').insert({operator,action:'notify',detail:text});
+
+async function dbAddNotification(text, operator=null){
+  // 操作主体はログイン経路からのみ決定する。
+  // 管理者ログイン → admin
+  // 患者IDログイン → 患者ID
+  const actor = getCurrentActor();
+  if(!actor){
+    console.error('通知保存中止：ログイン主体が確定していません', {text, currentActorType, currentActorPatientId});
+    return false;
+  }
+  const {data,error}=await sb.from('notifications')
+    .insert({message:text,operator:actor})
+    .select().single();
+  if(error){ console.error('通知保存失敗:',error); return false; }
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
+  await sb.from('operation_logs').insert({operator:actor,action:'notify',detail:text});
+  if(document.getElementById('notif-list')) renderNotifications();
+  return true;
 }
 
 async function dbLog(operator,action,detail){
@@ -1553,9 +1423,9 @@ async function dbUpdatePatient(id,p){
 async function dbDeletePatient(id){
   // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
   // 5年より古い実施済予約は削除し、未実施の予約も削除する。
-  const cutoff=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  const cutoff=new Date();
   cutoff.setFullYear(cutoff.getFullYear()-5);
-  const cutoffStr=dateStr(cutoff);
+  const cutoffStr=cutoff.toISOString().split('T')[0];
 
   const {error:oldDoneErr}=await sb.from('bookings').delete()
     .eq('patient_id',id).eq('status','done').lt('booking_date',cutoffStr);
@@ -1586,7 +1456,6 @@ function showScreen(id){
   if(pwOld)pwOld.value='';
   if(pwNew)pwNew.value='';
   if(pwNew2)pwNew2.value='';
-  if(id==='s-top')topCalResetDisplay();
 }
 function switchTab(prefix,name,el){
   const all=prefix==='p'?['mybook','reserve','history']:
@@ -1607,7 +1476,7 @@ function switchTab(prefix,name,el){
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
   if(name==='patients')renderPatientList();
-  if(name==='booking'){renderBasicBookingTable();const m=document.getElementById('basic-booking-month');if(m&&!m.value)m.value=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;}
+  if(name==='booking')renderBooking();
   if(name==='holidays')renderHolidays();
   if(name==='slots'){populateStaffSelect('slot-th');renderSlotDefs();}
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
@@ -1621,6 +1490,8 @@ function renderTodaySchedule(){
   const el=document.getElementById('today-schedule');
   if(!el)return;
   const ds=dateStr(TODAY);
+  const dow=TODAY.getDay();
+  const clinicClosed=isHoliday(ds)||dow===0;
   ensureBookingShape(ds);
 
   if(!staffList.length){
@@ -1631,7 +1502,9 @@ function renderTodaySchedule(){
   let html='<div style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch">';
   staffList.forEach(s=>{
     const th=s.id;
-    const times=timesForDate(ds,th).sort((a,b)=>{
+    const specialOpen=hasSpecialBusinessDay(ds,th);
+    const closed=clinicClosed&&!specialOpen;
+    const times=closed?[]:timesForDate(ds,th).sort((a,b)=>{
       const [ah,am]=a.split(':').map(Number);
       const [bh,bm]=b.split(':').map(Number);
       return (ah*60+am)-(bh*60+bm);
@@ -1640,35 +1513,21 @@ function renderTodaySchedule(){
     html+=`<div class="card" style="flex:1 0 250px;max-width:360px;padding:10px 12px;margin:0">
       <div style="font-size:14px;font-weight:700;padding:2px 2px 9px;margin-bottom:4px;border-bottom:1px solid #E5E5EA;white-space:nowrap">${s.name}</div>`;
 
-    if(!times.length){
+    if(closed){
+      html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:18px 4px">🔴 本日は休診日です</div>';
+    }else if(!times.length){
       html+='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:18px 4px">本日の予約枠はありません</div>';
     }else{
-      let visibleCount=0;
       times.forEach(t=>{
         const pid=bookings[ds]?.[th]?.[t];
         const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
         const empty=!pid;
-        const slotOff=!isSlotAvailable(ds,t,th);
-        if(slotOff){
-          const lv=isLeave(ds,th);
-          const lvFull=lv&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
-          const reason=lvFull?'休暇':(isDayOff(ds)||isHolidayPeriodOff(ds,t)||isAfternoonOff(ds,t)||isMorningOff(ds,t)?'休診':'休');
-          html+=`<div class="sched-row" style="min-width:0;opacity:.65;cursor:default" title="週間表と同じ休診・休暇設定を反映しています">
-            <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
-            <span class="sched-name" style="color:#9CA3AF;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${reason}</span>
-          </div>`;
-          return;
-        }
-        visibleCount++;
-        html+=`<div class="sched-row" style="min-width:0;cursor:pointer" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">
+        html+=`<div class="sched-row" style="min-width:0">
           <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
           <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
           ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
         </div>`;
       });
-      if(visibleCount===0){
-        html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:8px 4px">🔴 本日は予約可能な時間帯がありません</div>';
-      }
     }
     html+='</div>';
   });
@@ -1734,10 +1593,8 @@ function weekTableWeekendDays(ws){
   });
   return out;
 }
-let weekTableLoadError='';
 async function loadWeekTableBookings(ws){
   const from=dateStr(ws), to=dateStr(addDays(ws,6));
-  weekTableLoadError='';
   try{
     const {data,error}=await sb.from('bookings')
       .select('booking_date,time_slot,therapist,patient_id,status,unit')
@@ -1756,7 +1613,6 @@ async function loadWeekTableBookings(ws){
       bookingUnits[b.booking_date][b.therapist][t]=b.unit||2;
     });
   }catch(e){
-    weekTableLoadError='予約データの取得に失敗しました。インターネット接続とSupabaseの状態を確認して、「再読み込み」をお試しください。';
     console.error('週間表の過去データ取得失敗',e);
   }
 }
@@ -1791,10 +1647,6 @@ async function renderWeekTable(){
   await loadWeekTableBookings(wsForLoad);
   const el=document.getElementById('weektable-body');
   if(!el)return;
-  if(weekTableLoadError){
-    el.innerHTML=`<div style="padding:18px;text-align:center;background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;color:#9A3412;font-size:13px">⚠️ ${weekTableLoadError}<br><button class="btn btn-sm" style="margin-top:10px" onclick="renderWeekTable()">再読み込み</button></div>`;
-    return;
-  }
   const ws=monday(addDays(TODAY,weekTableOffset*7));
   const days=weekTableWeekendMode?weekTableWeekendDays(ws):[0,1,2,3,4].map(i=>addDays(ws,i));
   const isWeekendView=weekTableWeekendMode;
@@ -1838,11 +1690,10 @@ async function renderWeekTable(){
     const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
-    html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると担当者を選択して、その日の予約をすべて実施済にできます">
+    html+=`<th colspan="${THERAPISTS.length}" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W}">
       <div style="font-weight:600">${dayLabel}</div>
       <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
       ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
-      <div style="font-size:8px;color:#2563EB;margin-top:2px">日付を押して一括実施済</div>
     </th>`;
   });
   html+=`</tr>`;
@@ -1934,61 +1785,6 @@ async function renderWeekTable(){
   el.innerHTML=html;
   const sumEl=document.getElementById('weektable-summary');
   if(sumEl)sumEl.innerHTML=isWeekendView?'<div style="font-size:11px;color:#8E8E93;margin-top:4px">※ 土曜日・日曜日に営業がある場合のみ表示しています。</div>':'';
-}
-
-function weekTableBulkDoneModal(ds){
-  const d=parseLocalDate(ds);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
-  const counts=staffList.map(s=>{
-    const statuses=bookingStatuses[ds]?.[s.id]||{};
-    const reserved=Object.values(statuses).filter(st=>st==='reserved').length;
-    const done=Object.values(statuses).filter(st=>st==='done').length;
-    return {id:s.id,name:s.name,reserved,done};
-  });
-  openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">${m}月${day}日（${wd}）の一括実施済</div>
-    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px;line-height:1.6">担当者を選択すると、その担当者の当日の「予約中」の予約をすべて実施済にします。すでに実施済・キャンセル・振替・来なかった予約は変更しません。</p>
-    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:14px">
-      ${counts.map(c=>`<button class="btn btn-green" onclick="weekTableBulkDone('${ds}','${c.id}')">${c.name}<span style="font-size:11px;margin-left:6px;opacity:.8">予約中 ${c.reserved}件${c.done?` ／ 実施済 ${c.done}件`:''}</span></button>`).join('')}
-    </div>
-    <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
-}
-async function weekTableBulkDone(ds,therapist){
-  const statuses=bookingStatuses[ds]?.[therapist]||{};
-  const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved').map(([t])=>normalizeTime(t));
-  if(!targetTimes.length){
-    showToast('実施済に変更する「予約中」の予約はありません');
-    return;
-  }
-  const ok=confirm(`${getStaffName(therapist)}の${ds}の予約をすべて実施済にしますか？\n対象：${targetTimes.length}件`);
-  if(!ok)return;
-  const {data,error}=await sb.from('bookings')
-    .update({status:'done'})
-    .eq('booking_date',ds)
-    .eq('therapist',therapist)
-    .eq('status','reserved')
-    .select('id,patient_id,time_slot,unit');
-  if(error){
-    console.error('一括実施済更新失敗',error);
-    showToast('一括更新に失敗しました。時間をおいて再度お試しください。');
-    return;
-  }
-  (data||[]).forEach(r=>{
-    const t=normalizeTime(r.time_slot);
-    if(!bookingStatuses[ds])bookingStatuses[ds]={};
-    if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={};
-    bookingStatuses[ds][therapist][t]='done';
-    if(!bookingUnits[ds])bookingUnits[ds]={};
-    if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={};
-    bookingUnits[ds][therapist][t]=r.unit||2;
-  });
-  await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「実施済」に変更【管理者】`,'admin');
-  closeModal();
-  await reloadBookings();
-  await renderWeekTable();
-  renderTodaySchedule();
-  renderNotifications();
-  showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件を実施済にしました`,'#34C759');
 }
 
 function weekTableBookModal(ds,therapist,time){
@@ -2113,32 +1909,12 @@ async function weekTableDoBook(ds,therapist,time){
   const pid=wtSelectedPid;
   if(!patients[pid]){err.textContent='患者IDが見つかりません';err.style.display='block';return;}
 
-  // 3単位は60分連続で確保できる場合のみ登録可能。
-  // 予約枠の開始時刻は40分単位でも、実際の診療時間は20分刻みで連続しているため、
-  // 「8:30・8:50・9:10」の3つすべてがslotDefsに存在することは要求しない。
-  // 最終的な重複判定はdbBookSlotで、既存予約の実時間との重なりを確認する。
-  if(isThreeUnits){
-    const t1=normTime;
-    const tEnd=normalizeTime(addMinutesToTime(t1,60));
-    if(!isSlotAvailable(ds,t1,therapist)){
-      err.textContent=`${t1}は現在予約できない時間帯です。別の時間をお選びください。`;
-      err.style.display='block';return;
-    }
-    // 60分の途中で休診・PT休暇にかかる場合は登録不可。
-    for(const offset of [0,20,40]){
-      const seg=normalizeTime(addMinutesToTime(t1,offset));
-      if(!isSlotAvailable(ds,seg,therapist)){
-        err.textContent=`3単位（60分）を登録する時間帯（${t1}〜${tEnd}）に休診・休暇時間が含まれています。別の時間をお選びください。`;
-        err.style.display='block';return;
-      }
-    }
-  }
-
   if(isOverDeadline(pid)){
     const ym=ds.substring(0,7);
-    const usedUnits=await countMonthlyBookingUnits(pid,ym);
-    if(usedUnits+unit>13){
-      err.textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      const m=parseInt(ym.split('-')[1]);
+      err.textContent=`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`;
       err.style.display='block';return;
     }
   }
@@ -2164,8 +1940,8 @@ async function weekTableDoBook(ds,therapist,time){
       const nds=dateStr(nd);
       if(isTherapistOff(nds,therapist)||nd.getDay()===0)continue;
       if(isOverDeadline(pid)){
-        const usedUnits=await countMonthlyBookingUnits(pid,nds.substring(0,7));
-        if(usedUnits+2>13)break;
+        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
+        if(cnt>=6)break;
       }
       // DBから最新状態を確認して重複チェック
       if(!bookings[nds]?.[therapist]?.[normTime]){
@@ -2211,11 +1987,9 @@ async function wtUpdateStatus(ds,therapist,time,status){
   const pName=await resolvePatientName(r.patientId);
   const label={done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
   await dbAddNotification(`${pName} ${ds} ${time} を「${label}」に変更【管理者】`,'admin');
-  await reloadBookings();
-  closeModal();
-  renderWeekTable();
-  renderTodaySchedule();
   renderNotifications();
+  await reloadBookings();
+  closeModal();renderWeekTable();
   showToast(`${label}に変更しました`,'#34C759');
 }
 
@@ -2294,106 +2068,8 @@ async function deleteLeave(id,th,ds){
   renderLeaves(th);renderWeekTable();updateLastUpdated();
 }
 
-// ---- TOP AVAILABILITY CALENDAR ----
-function topCalResetDisplay(){
-  const start=document.getElementById('top-cal-start');
-  const content=document.getElementById('top-cal-content');
-  const grid=document.getElementById('top-cal-grid');
-  if(start)start.style.display='block';
-  if(content)content.style.display='none';
-  if(grid)grid.innerHTML='';
-}
-function topCalShow(){
-  const start=document.getElementById('top-cal-start');
-  const content=document.getElementById('top-cal-content');
-  if(start)start.style.display='none';
-  if(content)content.style.display='block';
-  renderTopAvailabilityCalendar();
-}
-function topCalNav(delta){
-  topCalMonth+=delta;
-  if(topCalMonth>11){topCalMonth=0;topCalYear++;}
-  if(topCalMonth<0){topCalMonth=11;topCalYear--;}
-  renderTopAvailabilityCalendar();
-}
-async function loadTopCalendarBookings(){
-  const from=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-01`;
-  const last=new Date(topCalYear,topCalMonth+1,0).getDate();
-  const to=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
-  try{
-    const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to);
-    if(error)throw error;
-    topCalBookings={};
-    (data||[]).forEach(b=>{
-      if(!topCalBookings[b.booking_date])topCalBookings[b.booking_date]={};
-      if(!topCalBookings[b.booking_date][b.therapist])topCalBookings[b.booking_date][b.therapist]={};
-      topCalBookings[b.booking_date][b.therapist][normalizeTime(b.time_slot)]=b;
-    });
-  }catch(e){
-    console.error('トップカレンダーの予約取得失敗',e);
-    topCalBookings={};
-  }
-}
-function topCalHasOpen(ds){
-  const d=parseLocalDate(ds);
-  if(d<TODAY || !isDateWithinReception(ds))return false;
-  return staffList.some(s=>{
-    const times=timesForDate(ds,s.id);
-    if(!times.length)return false;
-    if(isDayOff(ds)&&!hasSpecialBusinessDay(ds,s.id))return false;
-    return times.some(t=>{
-      if(!isSlotAvailable(ds,t,s.id))return false;
-      const b=topCalBookings[ds]?.[s.id]?.[normalizeTime(t)];
-      return !b || b.status==='cancelled' || b.status==='transfer';
-    });
-  });
-}
-async function renderTopAvailabilityCalendar(){
-  const grid=document.getElementById('top-cal-grid');
-  const label=document.getElementById('top-cal-label');
-  if(!grid||!label)return;
-  label.textContent=`${topCalYear}年${topCalMonth+1}月`;
-  grid.innerHTML='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:10px">空き状況を確認中…</div>';
-  await loadTopCalendarBookings();
-  const first=new Date(topCalYear,topCalMonth,1).getDay();
-  const dim=new Date(topCalYear,topCalMonth+1,0).getDate();
-  const prevDim=new Date(topCalYear,topCalMonth,0).getDate();
-  let html='<div class="cal-grid">';
-  DAY_NAMES.forEach(d=>html+=`<div class="cal-hd">${d}</div>`);
-  for(let i=0;i<first;i++)html+=`<div class="top-cal-cell other">${prevDim-first+i+1}</div>`;
-  for(let d=1;d<=dim;d++){
-    const ds=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const date=parseLocalDate(ds);
-    const isPast=date<TODAY;
-    const isHolidayDay=isHoliday(ds)||date.getDay()===0;
-    const hasOpen=topCalHasOpen(ds);
-    let cls='top-cal-cell';
-    if(isHolidayDay&&!hasOpen)cls+=' closed-day';
-    else if(hasOpen)cls+=' open-day';
-    if(ds===dateStr(TODAY))cls+=' today';
-    if(ds===pubTargetDate)cls+=' selected';
-    const clickable=hasOpen&&!isPast;
-    html+=`<div class="${cls}" ${clickable?`onclick="openPublicDate('${ds}')"`:''}>${d}${hasOpen?'<span style="font-size:9px;font-weight:600">空きあり</span>':(isHolidayDay?'<span style="font-size:8px">休</span>':'')}</div>`;
-  }
-  const rem=(7-((first+dim)%7))%7;
-  for(let i=1;i<=rem;i++)html+=`<div class="top-cal-cell other">${i}</div>`;
-  html+='</div>';
-  grid.innerHTML=html;
-}
-function openPublicDate(ds){
-  pubTargetDate=ds;
-  pubTherapist=null;
-  const d=parseLocalDate(ds);
-  const diffDays=Math.round((monday(d)-monday(TODAY))/(24*60*60*1000));
-  pubWeekOffset=Math.floor(diffDays/7);
-  showScreen('s-public');
-  renderPublicScreenState();
-  renderTopAvailabilityCalendar();
-}
-
 // ---- PUBLIC SLOTS ----
 function openPublicSlots(){
-  pubTargetDate=null;
   showScreen('s-public');
   renderPublicScreenState();
 }
@@ -2417,13 +2093,7 @@ function renderPublicScreenState(){
 }
 function pubSelectTherapist(t){
   if(!isReceptionOpen())return;
-  pubTherapist=t;
-  if(pubTargetDate){
-    const target=parseLocalDate(pubTargetDate);
-    pubWeekOffset=Math.floor((monday(target)-monday(TODAY))/ (7*24*60*60*1000));
-  }else{
-    pubWeekOffset=0;
-  }
+  pubTherapist=t;pubWeekOffset=0;
   document.querySelectorAll('#pub-th-cards .th-select-card').forEach(card=>{
     card.classList.toggle('active',card.dataset.staffId===t);
   });
@@ -2434,7 +2104,6 @@ function pubSelectTherapist(t){
 }
 function pubResetTherapist(){
   pubTherapist=null;
-  pubTargetDate=null;
   document.getElementById('pub-th-select').style.display='block';
   document.getElementById('pub-slots-wrap').style.display='none';
 }
@@ -2448,8 +2117,8 @@ function renderPublicSlots(){
   document.getElementById('pub-week-label').textContent=
     `${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
   let html='';let anyOpen=false;
-  const publicDates=pubTargetDate?[parseLocalDate(pubTargetDate)]:Array.from({length:5},(_,i)=>addDays(ws,i));
-  for(const d of publicDates){
+  for(let i=0;i<5;i++){
+    const d=addDays(ws,i);
     const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
@@ -2521,7 +2190,8 @@ function patientLogin(){
   const id=document.getElementById('pid-input').value.trim().toLowerCase();
   const err=document.getElementById('p-err');
   if(patients[id]){
-    currentPid=id;err.style.display='none';
+    currentPid=id;
+    setActor('patient', currentPid);err.style.display='none';
     document.getElementById('p-welcome').textContent=patients[id].name+' さん';
     document.getElementById('p-id-sub').textContent=id;
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
@@ -2762,13 +2432,12 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
     return;
   }
 
-  // 算定期限超過後は当月13単位まで。患者側予約でも同じ制限を適用する。
+  // 期限切れ患者の月6回チェック
   if(isOverDeadline(currentPid)){
     const ym=fullDate.substring(0,7);
-    const usedUnits=await countMonthlyBookingUnits(currentPid,ym);
-    const requestedUnit=2;
-    if(usedUnits+requestedUnit>13){
-      document.getElementById('res-err').textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
+    const cnt=countMonthlyBookings(currentPid,ym);
+    if(cnt>=6){
+      document.getElementById('res-err').textContent='制度上月6回しか予約できません';
       document.getElementById('res-err').style.display='block';
       return;
     }
@@ -2787,27 +2456,41 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
 
 
 // ---- ADMIN ----
-// 初期DB読み込み完了前のログインによる「本日の予定」空表示を防止
-let appDataReady=null;
-async function adminLogin(){
+function adminLogin(){
   const pw=document.getElementById('admin-pw').value;
-  if(pw!==ADMIN_PW){document.getElementById('admin-err').style.display='block';return;}
-  document.getElementById('admin-err').style.display='none';
-  document.getElementById('admin-pw').value='';
-  if(appDataReady){try{await appDataReady;}catch(e){console.error('初期データ待機エラー',e);}}
-  const now=new Date();
-  document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
-  weekTableOffset=0; weekTableWeekendMode=false;
-  populateClinicSettingsInputs();
-  document.getElementById('s-start').value=settings.start;
-  document.getElementById('s-end').value=settings.end;
-  document.getElementById('s-tstart').value=settings.tstart;
-  document.getElementById('s-tend').value=settings.tend;
-  showScreen('s-admin');
-  renderNotifications(); renderDeadline(); renderSettingsDisplay(); renderTodaySchedule();
-  dbLog('admin','login','管理者ログイン');
+  if(pw===ADMIN_PW){
+    setActor('admin');
+    document.getElementById('admin-err').style.display='none';
+    document.getElementById('admin-pw').value='';
+    const now=new Date();
+    document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
+    renderNotifications();renderDeadline();renderSettingsDisplay();
+    renderTodaySchedule();
+    weekTableOffset=0;
+    weekTableWeekendMode=false;
+    populateClinicSettingsInputs();
+    document.getElementById('s-start').value=settings.start;
+    document.getElementById('s-end').value=settings.end;
+    document.getElementById('s-tstart').value=settings.tstart;
+    document.getElementById('s-tend').value=settings.tend;
+    showScreen('s-admin');
+    renderNotifications();
+    dbLog('admin','login','管理者ログイン');
+  } else {document.getElementById('admin-err').style.display='block';}
 }
 
+// 操作主体をログイン経路で一元管理
+let currentActorType = 'system';
+let currentActorPatientId = null;
+function setActor(type, patientId=null){
+  currentActorType = type;
+  currentActorPatientId = patientId ? String(patientId) : null;
+}
+function getCurrentActor(){
+  if(currentActorType === 'admin') return 'admin';
+  if(currentActorType === 'patient' && currentActorPatientId) return currentActorPatientId;
+  return null;
+}
 let notifShowCount={patient:5,admin:5};
 
 function renderNotifications(){
@@ -2816,8 +2499,9 @@ function renderNotifications(){
   const cnt=document.getElementById('notif-cnt');
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
-  const patientNotifs=notifications.filter(n=>n.operator!=='admin'&&n.operator!=='system');
-  const adminNotifs=notifications.filter(n=>n.operator==='admin'||n.operator==='system');
+  const patientIds = new Set(Object.keys(patients||{}).map(String));
+  const patientNotifs=notifications.filter(n=>n.operator && n.operator!=='admin' && patientIds.has(String(n.operator)));
+  const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=notifications.length;
   cnt.textContent=total;cnt.style.display='inline-flex';empty.style.display='none';
 
@@ -3033,6 +2717,7 @@ async function updateStatus(date,therapist,time,status){
   const pName=await resolvePatientName(r.patientId);
   const label={done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
   await dbAddNotification(`${pName} ${date} ${time} を「${label}」に変更【管理者】`,'admin');
+  renderNotifications();
   loadStatusSlots();
   showToast(`${label}に変更しました`,'#34C759');
 }
@@ -3389,7 +3074,7 @@ async function deletePatient(id){
       });
     });
   });
-  renderPatientList();renderDeadline();renderBasicBookingTable();updateLastUpdated();
+  renderPatientList();renderDeadline();renderBooking();updateLastUpdated();
   showToast(`${p.name}さんを患者管理から削除しました。実施済の履歴は保持されています`,'#34C759');
 }
 function openExcelImport(){
@@ -3431,29 +3116,173 @@ async function doExcelImport(){
 
 // ---- ADMIN BOOKING ----
 
-// 月間予約単位数チェック（期限超過患者は月13単位まで）
-async function countMonthlyBookingUnits(pid,yearMonth){
-  // DBを直接集計し、ローカルの週間表キャッシュに依存しない。
-  const start=`${yearMonth}-01`;
-  const [y,m]=yearMonth.split('-').map(Number);
-  const end=dateStr(new Date(y,m,0));
-  const {data,error}=await sb.from('bookings')
-    .select('unit,status')
-    .eq('patient_id',pid)
-    .gte('booking_date',start)
-    .lte('booking_date',end);
-  if(error){
-    console.warn('月間単位数の取得に失敗しました',error);
-    // 通信失敗時は安全側に倒し、予約処理側で拒否できるよう十分大きな値を返す。
-    return 14;
-  }
-  return (data||[]).reduce((sum,b)=>b.status==='cancelled'?sum:sum+Number(b.unit||2),0);
+// 月間予約件数チェック（期限超過患者は月6回まで）
+function countMonthlyBookings(pid,yearMonth){
+  // yearMonth: "2025-07" 形式
+  let count=0;
+  Object.keys(bookings).forEach(date=>{
+    if(!date.startsWith(yearMonth))return;
+    staffList.forEach(s=>{
+      const th=s.id;
+      Object.entries(bookings[date][th]||{}).forEach(([t,bpid])=>{
+        if(bpid===pid && bookingStatuses[date]?.[th]?.[t]!=='cancelled') count++;
+      });
+    });
+  });
+  return count;
 }
 
 function isOverDeadline(pid){
   const p=patients[pid];
   if(!p||!p.deadline)return false;
   return p.deadline < TODAY;
+}
+
+function renderBooking(){
+  const sel=document.getElementById('bk-pid');
+  let html='<option value="">患者を選択</option>';
+  Object.entries(patients).filter(([id])=>!isArchivedPatient(id)).forEach(([id,p])=>{html+=`<option value="${id}">${id}：${p.name}</option>`;});
+  sel.innerHTML=html;
+  bkWeekOffset=0;
+  document.getElementById('bk-info').style.display='none';
+  document.getElementById('bk-slot-sec').style.display='none';
+
+  // 参照月＝先月、反映先月＝今月をデフォルトにする（未入力の場合のみ）
+  const prevEl=document.getElementById('prev-month-select');
+  const targetEl=document.getElementById('target-month-select');
+  if(prevEl&&!prevEl.value){
+    const pd=new Date(TODAY.getFullYear(),TODAY.getMonth()-1,1);
+    prevEl.value=`${pd.getFullYear()}-${String(pd.getMonth()+1).padStart(2,'0')}`;
+  }
+  if(targetEl&&!targetEl.value){
+    targetEl.value=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+  }
+  updatePrevMonthReflectLabel();
+}
+function updatePrevMonthReflectLabel(){
+  const btn=document.getElementById('prev-month-reflect-btn');
+  if(!btn)return;
+  const targetEl=document.getElementById('target-month-select');
+  const tv=targetEl?.value||'';
+  if(tv){
+    const [ty,tm]=tv.split('-').map(Number);
+    btn.textContent=`🔁 ${tm}月に一括反映する`;
+  } else {
+    btn.textContent='🔁 一括反映する';
+  }
+}
+function bkWeekNav(d){bkWeekOffset+=d;renderBkSlots();}
+function loadBookingPatient(){
+  const pid=document.getElementById('bk-pid').value;
+  adminBookSelected=null;bkWeekOffset=0;
+  if(!pid){document.getElementById('bk-info').style.display='none';document.getElementById('bk-slot-sec').style.display='none';return;}
+  const p=patients[pid];
+  const dl=dateStr(p.deadline);
+  const over=isOverDeadline(pid);
+  document.getElementById('bk-info').innerHTML=`<strong>${p.name}</strong>（${pid}）<br>疾患：${p.disease}　担当：${getStaffName(p.therapist)}<br>期限：${dl}${over?'　<span class="badge badge-danger">期限切れ</span>':''}`;
+  document.getElementById('bk-info').style.display='block';
+  renderBkSlots();
+  document.getElementById('bk-slot-sec').style.display='block';
+}
+function renderBkSlots(){
+  const pid=document.getElementById('bk-pid').value;if(!pid)return;
+  const p=patients[pid];
+  const ws=monday(addDays(TODAY,bkWeekOffset*7));
+  const we=addDays(ws,4);
+  document.getElementById('bk-week-label').textContent=`${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
+
+  // 時系列ソートした全スロットを収集
+  const allSlots=[];
+  for(let i=0;i<5;i++){
+    const d=addDays(ws,i);const ds=dateStr(d);
+    if(d<TODAY)continue;
+    const dow=d.getDay();
+    if(isTherapistOff(ds,p.therapist))continue;
+    const times=timesForDate(ds,p.therapist).sort((a,b)=>{
+      const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
+      return(ah*60+am)-(bh*60+bm);
+    });
+    ensureBookingShape(ds);
+    times.forEach(t=>{
+      if(!bookings[ds]?.[p.therapist]?.[normalizeTime(t)]){
+        allSlots.push({ds,t,dow,d});
+      }
+    });
+  }
+  // 日付→時間の順でソート（すでに日付順→時間順）
+  if(!allSlots.length){
+    document.getElementById('bk-slots').innerHTML='<div style="font-size:13px;color:#8E8E93">この週の空き枠はありません</div>';
+    return;
+  }
+  let html='';
+  allSlots.forEach(({ds,t,dow,d})=>{
+    const key=`${ds}_${t}`;
+    const ym=ds.substring(0,7);
+    const cnt=isOverDeadline(pid)?countMonthlyBookings(pid,ym):0;
+    const limitOver=isOverDeadline(pid)&&cnt>=6;
+    html+=`<div class="slot ${limitOver?'full':'open'}" id="bks-${key}" 
+      onclick="${limitOver?`showToast('制度上月6回しか予約できません','#FF3B30')`:`selBkSlot('${ds}','${t}','${DAY_NAMES[dow]}','${d.getMonth()+1}/${d.getDate()}')`}">
+      ${DAY_NAMES[dow]}曜 ${d.getMonth()+1}/${d.getDate()} ${t}${limitOver?'　❌月6回上限':''}
+    </div>`;
+  });
+  document.getElementById('bk-slots').innerHTML=html;
+}
+function selBkSlot(ds,time,day,date){
+  adminBookSelected={ds,time,day,date};
+  document.querySelectorAll('[id^="bks-"]').forEach(el=>el.style.outline='');
+  const el=document.getElementById(`bks-${ds}_${time}`);
+  if(el)el.style.outline='2px solid #007AFF';
+}
+async function doAdminBooking(){
+  const pid=document.getElementById('bk-pid').value;
+  if(!pid){showToast('患者を選択してください');return;}
+  if(!adminBookSelected){showToast('空き枠を選択してください');return;}
+  const p=patients[pid];const{ds,time,day,date}=adminBookSelected;
+
+  // 期限切れ患者の月6回チェック
+  if(isOverDeadline(pid)){
+    const ym=ds.substring(0,7);
+    const cnt=countMonthlyBookings(pid,ym);
+    if(cnt>=6){
+      showToast('制度上月6回しか予約できません','#FF3B30');
+      return;
+    }
+  }
+
+  const r=await dbBookSlot(ds,p.therapist,time,pid);
+  if(!r.ok){showToast(r.reason);renderBkSlots();return;}
+  await dbLog('admin','book',`${p.name}（${pid}）${date} ${day}曜 ${time} に予約`);
+  await dbAddNotification(`${p.name}（${pid}）${date} ${day}曜 ${time} に予約【管理者】`,'admin');
+
+  // 同月分のみ毎週自動予約
+  const auto=document.getElementById('bk-auto').value;
+  if(auto==='weekly'){
+    const baseDate=parseLocalDate(ds);
+    const baseMonth=baseDate.getMonth();
+    const baseYear=baseDate.getFullYear();
+    let autoCount=0;
+    for(let w=1;w<=5;w++){// 最大5週先（同月内）
+      const nd=addDays(baseDate,w*7);
+      // 月が変わったら終了
+      if(nd.getMonth()!==baseMonth||nd.getFullYear()!==baseYear)break;
+      const nds=dateStr(nd);
+      if(isTherapistOff(nds,p.therapist)||nd.getDay()===0)continue;
+      // 期限切れ患者の月6回チェック
+      if(isOverDeadline(pid)){
+        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
+        if(cnt>=6)break;
+      }
+      ensureBookingShape(nds);
+      if(!bookings[nds][p.therapist][time]){
+        const nr=await dbBookSlot(nds,p.therapist,time,pid);
+        if(nr.ok)autoCount++;
+      }
+    }
+    showToast(`予約完了。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
+  } else {
+    showToast(`${p.name} さんの予約を ${date} ${time} に設定しました`,'#34C759');
+  }
+  renderNotifications();renderBkSlots();
 }
 
 // ---- CSV出力 ----
@@ -3509,214 +3338,128 @@ ${tableHTML}
   printWin.document.close();
 }
 
-// ---- 基本表：担当者×曜日×時間×患者 ----
-const BASIC_BOOKING_DAYS=[
-  {dow:1,name:'月曜日'},{dow:2,name:'火曜日'},{dow:3,name:'水曜日'},
-  {dow:4,name:'木曜日'},{dow:5,name:'金曜日'},{dow:6,name:'土曜日'},{dow:0,name:'日曜日'}
-];
-let basicBookingPatterns={}; // {therapist:{dow:{time:patientId}}}
-
-function basicBookingKey(therapist,dow,time){
-  return `${therapist}|${dow}|${normalizeTime(time)}`;
-}
-function getBasicBookingPid(therapist,dow,time){
-  return basicBookingPatterns[basicBookingKey(therapist,dow,time)]||'';
-}
-function setBasicBookingPid(therapist,dow,time,pid){
-  const key=basicBookingKey(therapist,dow,time);
-  if(pid) basicBookingPatterns[key]=pid;
-  else delete basicBookingPatterns[key];
-  saveBasicBookingPatterns();
-}
-
-function saveBasicBookingPatterns(){
-  // 基本表はシステム設定に保存するため、ページを閉じても維持する。
-  dbSaveSetting('basic_booking_patterns',JSON.stringify(basicBookingPatterns));
-}
-
-function loadBasicBookingPatternsFromSettings(){
-  // loadAllData() で設定値を読み込んだ後に呼び出す。
-  // settingsData がない環境でも安全に空表から開始する。
-  try{
-    const raw=(window.__basicBookingPatternsRaw||'');
-    const parsed=raw?JSON.parse(raw):{};
-    if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)) basicBookingPatterns=parsed;
-  }catch(e){basicBookingPatterns={};}
-}
-
-function populateBasicBookingTherapistSelects(){
-  const selects=[document.getElementById('basic-booking-therapist'),document.getElementById('basic-booking-reflect-therapist')].filter(Boolean);
-  selects.forEach(sel=>{
-    const current=sel.value;
-    sel.innerHTML=staffList.length
-      ? staffList.map(st=>`<option value="${escapeHtml(st.id)}">${escapeHtml(st.name)}</option>`).join('')
-      : '<option value="">担当者が登録されていません</option>';
-    if(current && staffList.some(st=>st.id===current)) sel.value=current;
-  });
-}
-
-function renderBasicBookingTable(){
-  const el=document.getElementById('basic-booking-table');
-  if(!el)return;
-  populateBasicBookingTherapistSelects();
-  const therapist=document.getElementById('basic-booking-therapist')?.value || staffList[0]?.id || '';
-  const st=staffList.find(x=>x.id===therapist);
-  if(!st){el.innerHTML='<div class="empty">担当者が登録されていません</div>';return;}
-  let html=`<div style="margin-bottom:10px;font-size:13px;color:#636366"><strong>${escapeHtml(st.name)}</strong> の基本表</div>`;
-  BASIC_BOOKING_DAYS.forEach(day=>{
-    const times=slotDefsForDay(day.dow,st.id);
-    html+=`<div style="padding:8px 10px;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:6px">${day.name}</div>`;
-    if(!times.length){
-      html+='<div style="font-size:12px;color:#8E8E93">枠設定なし</div>';
-    }else{
-      html+='<div style="display:flex;flex-direction:column;gap:6px">';
-      times.forEach(time=>{
-        const pid=getBasicBookingPid(st.id,day.dow,time);
-        const pp=pid?patients[pid]:null;
-        const label=pp
-          ? `${escapeHtml(pp.name||'')}<span style="font-size:11px;color:#8E8E93;margin-left:6px">${escapeHtml(pp.kana||pp.furigana||'')} ／ ${escapeHtml(pid)}</span>`
-          : '患者を選択';
-        html+=`<div style="display:grid;grid-template-columns:70px 1fr 42px;gap:8px;align-items:center">
-          <div style="font-size:13px;font-weight:600">${escapeHtml(time)}</div>
-          <button type="button" class="btn" style="text-align:left;min-width:0;background:#fff;border:1px solid #D1D1D6;color:#1C1C1E" onclick="openBasicBookingPatientPicker('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}')">${label}</button>
-          <button class="btn btn-sm" title="この枠を空欄にする" onclick="setBasicBookingPid('${escapeJs(st.id)}',${day.dow},'${escapeJs(time)}','');renderBasicBookingTable()">×</button>
-        </div>`;
-      });
-      html+='</div>';
-    }
-    html+='</div>';
-  });
-  el.innerHTML=html;
-}
-
-// 基本表の患者登録は、週間表の代理予約と同じ患者選択モーダル方式にする。
-let basicBookingPickerKey=null;
-function openBasicBookingPatientPicker(therapist,dow,time){
-  basicBookingPickerKey={therapist,dow,time};
-  const current=getBasicBookingPid(therapist,dow,time);
-  const currentPatient=current?patients[current]:null;
-  openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">📅 代理予約 ― 患者を選択</div>
-    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">担当：${escapeHtml(getStaffName(therapist))} ／ ${escapeHtml(DAY_NAMES[dow])} ／ ${escapeHtml(time)}</p>
-    ${currentPatient?`<div style="background:#F5F5F7;border-radius:10px;padding:9px 11px;margin-bottom:10px;font-size:12px">現在：<strong>${escapeHtml(currentPatient.name||'')}</strong>　${escapeHtml(currentPatient.kana||currentPatient.furigana||'')} ／ ${escapeHtml(current)}</div>`:''}
-    <div class="input-group">
-      <label>患者を検索（患者ID・漢字・カタカナ・ふりがな）</label>
-      <input type="text" id="basic-patient-search" placeholder="例：山田 / ヤマダ / やまだ / ft900001" autocomplete="off" oninput="basicSearchPatient(this.value)">
-    </div>
-    <div id="basic-patient-results" style="max-height:300px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:12px"></div>
-    <button type="button" class="btn btn-block" onclick="selectBasicBookingPatient('')">患者を登録しない（空欄）</button>`);
-  basicSearchPatient('');
-}
-function basicSearchPatient(query){
-  const el=document.getElementById('basic-patient-results');
-  if(!el)return;
-  const q=String(query||'').trim().toLocaleLowerCase('ja');
-  let matched=Object.entries(patients).filter(([id])=>!isArchivedPatient(id));
-  if(q){
-    matched=matched.filter(([id,p])=>{
-      const hay=[id,p.name,p.kana,p.furigana].filter(Boolean).join(' ').toLocaleLowerCase('ja');
-      return hay.includes(q);
-    });
+// ---- 過去の予約を指定の月に反映 ----
+function openPrevMonthReflect(){
+  // 選択された参照月を取得
+  const sel=document.getElementById('prev-month-select');
+  let prevYM=sel?.value||'';
+  if(!prevYM){
+    // デフォルト：先月
+    const pd=new Date(TODAY.getFullYear(),TODAY.getMonth()-1,1);
+    prevYM=`${pd.getFullYear()}-${String(pd.getMonth()+1).padStart(2,'0')}`;
   }
-  matched.sort((a,b)=>(a[1].kana||a[1].furigana||a[1].name||'').localeCompare(b[1].kana||b[1].furigana||b[1].name||'','ja'));
-  if(!matched.length){
-    el.innerHTML='<div style="padding:14px;font-size:13px;color:#8E8E93">該当する患者が見つかりません</div>';
+  // 選択された反映先の月を取得（未選択なら今月）
+  const targetSel=document.getElementById('target-month-select');
+  let targetYM=targetSel?.value||'';
+  if(!targetYM){
+    targetYM=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+  }
+  const [py,pm]=prevYM.split('-').map(Number);
+  const [ty,tm]=targetYM.split('-').map(Number);
+
+  // 参照月の予約パターン収集（患者ごと：曜日・時間・担当）
+  const patterns={};
+  Object.keys(bookings).forEach(ds=>{
+    if(!ds.startsWith(prevYM))return;
+    const d=parseLocalDate(ds);const dow=d.getDay();
+    staffList.forEach(s=>{
+      const th=s.id;
+      Object.entries(bookings[ds][th]||{}).forEach(([time,pid])=>{
+        if(!pid)return;
+        if(!patterns[pid])patterns[pid]=[];
+        if(!patterns[pid].some(p=>p.dow===dow&&p.time===time&&p.therapist===th))
+          patterns[pid].push({dow,time,therapist:th});
+      });
+    });
+  });
+
+  if(!Object.keys(patterns).length){
+    showToast(`${py}年${pm}月の予約データが見つかりません`,'#FF9500');
     return;
   }
-  el.innerHTML=matched.slice(0,100).map(([id,p])=>`<button type="button" onclick="selectBasicBookingPatient('${escapeJs(id)}')" style="display:block;width:100%;text-align:left;background:#fff;border:0;border-bottom:1px solid #F2F2F7;padding:11px 14px;cursor:pointer">
-    <div style="font-weight:600;font-size:14px">${escapeHtml(p.name||'')}</div>
-    <div style="font-size:11px;color:#8E8E93">${escapeHtml(p.kana||p.furigana||'')} ／ ${escapeHtml(id)}${p.therapist?' ／ '+escapeHtml(getStaffName(p.therapist)):''}</div>
-  </button>`).join('')+(matched.length>100?'<div style="padding:8px;font-size:11px;color:#8E8E93">さらに絞り込んでください</div>':'');
+
+  let html=`<div class="modal-handle"></div>
+    <div class="modal-title">📋 予約の一括反映</div>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">${py}年${pm}月 → ${ty}年${tm}月</p>
+    <div style="max-height:260px;overflow-y:auto;margin-bottom:12px">`;
+
+  Object.entries(patterns).forEach(([pid,pats])=>{
+    const p=patients[pid];if(!p)return;
+    const patStr=pats.map(pt=>`${DAY_NAMES[pt.dow]}曜 ${pt.time}（${getStaffName(pt.therapist)}）`).join('、');
+    html+=`<div style="padding:8px 0;border-bottom:1px solid #F2F2F7;font-size:13px">
+      <span style="font-weight:600">${p.name}</span>
+      <span style="font-size:11px;color:#8E8E93;margin-left:6px">${pid}</span>
+      <div style="font-size:12px;color:#5E35B1;margin-top:2px">${patStr}</div>
+    </div>`;
+  });
+
+  html+=`</div>
+    <div class="notice" style="margin-bottom:12px">⚠️ 既に予約済みの枠・休診日・PT休暇日はスキップされます。反映先の月のカレンダー構成に合わせて該当する曜日のみ反映されます。</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-block" onclick="closeModal()">キャンセル</button>
+      <button class="btn btn-block" style="background:#5E35B1;color:#fff;border-color:#5E35B1" id="prev-reflect-btn" onclick="doPrevMonthReflect('${prevYM}','${targetYM}')">${tm}月に一括反映する</button>
+    </div>`;
+  openModal(html);
 }
-function selectBasicBookingPatient(pid){
-  if(!basicBookingPickerKey)return;
-  const {therapist,dow,time}=basicBookingPickerKey;
-  setBasicBookingPid(therapist,dow,time,pid);
-  basicBookingPickerKey=null;
-  closeModal();
-  renderBasicBookingTable();
-}
 
-function escapeHtml(v){
-  return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function escapeJs(v){return String(v??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
-
-async function applyBasicBookingMonth(){
-  const monthEl=document.getElementById('basic-booking-month');
-  const therapistEl=document.getElementById('basic-booking-reflect-therapist');
-  const btn=document.getElementById('basic-booking-reflect-btn');
-  const resultEl=document.getElementById('basic-booking-result');
-  let ym=monthEl?.value||'';
-  const therapist=therapistEl?.value||'';
-  if(!ym){
-    const d=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
-    ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    if(monthEl)monthEl.value=ym;
-  }
-  if(!therapist){showToast('担当者を選択してください','#FF9500');return;}
-
-  const patterns=Object.entries(basicBookingPatterns)
-    .map(([key,pid])=>{
-      const [th,dow,time]=key.split('|');
-      return {therapist:th,dow:Number(dow),time:normalizeTime(time),pid};
-    })
-    .filter(x=>x.therapist===therapist&&x.pid&&patients[x.pid]&&!isArchivedPatient(x.pid));
-
-  if(!patterns.length){showToast(`${getStaffName(therapist)}の基本表に患者が登録されていません`,'#FF9500');return;}
-
-  if(!confirm(`${getStaffName(therapist)}の基本表を${ym}に一括反映します。よろしいですか？`))return;
+async function doPrevMonthReflect(prevYM,targetYM){
+  const btn=document.getElementById('prev-reflect-btn');
   if(btn){btn.disabled=true;btn.textContent='処理中...';}
-  if(resultEl)resultEl.textContent='';
 
-  let registered=0,skip=0,closed=0,duplicate=0,limit=0,errorCount=0;
-  const monthDates=monthDays(ym);
+  // 反映先の月（未指定時は今月にフォールバック）
+  if(!targetYM)targetYM=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+  const [targetYear,targetMonthNum]=targetYM.split('-').map(Number);
+  const targetMonth=targetMonthNum-1; // 0始まりの月index
+  const [py,pm]=prevYM.split('-').map(Number);
 
-  // 同じ患者が複数の曜日・時間に設定されている場合も、それぞれ独立して反映する。
-  for(const pat of patterns){
-    for(const ds of monthDates){
-      const d=parseLocalDate(ds);
-      if(d.getDay()!==pat.dow)continue;
+  // 参照月の予約をDBから直接取得（ローカルに無い場合も対応）
+  let prevPatterns={};
+  const {data:prevBookings}=await sb.from('bookings')
+    .select('booking_date,time_slot,therapist,patient_id')
+    .gte('booking_date',`${prevYM}-01`)
+    .lte('booking_date',`${prevYM}-31`)
+    .eq('status','reserved');
+  (prevBookings||[]).forEach(b=>{
+    const d=parseLocalDate(b.booking_date);const dow=d.getDay();
+    const pid=b.patient_id;
+    if(!pid)return;
+    if(!prevPatterns[pid])prevPatterns[pid]=[];
+    if(!prevPatterns[pid].some(p=>p.dow===dow&&p.time===b.time_slot&&p.therapist===b.therapist))
+      prevPatterns[pid].push({dow,time:b.time_slot,therapist:b.therapist});
+  });
 
-      // 枠設定に存在しない日、休診日、担当者休暇は対象外。
-      if(!slotDefsForDay(d.getDay(),pat.therapist).includes(pat.time) || isTherapistOff(ds,pat.therapist)){
-        closed++;continue;
-      }
-      ensureBookingShape(ds);
-      const existingPid=bookings[ds]?.[pat.therapist]?.[pat.time]||null;
-      const existingStatus=bookingStatuses[ds]?.[pat.therapist]?.[pat.time]||'';
-      if(existingPid || ['reserved','noshow','done'].includes(existingStatus)){
-        duplicate++;continue;
-      }
+  // 反映先の月の全日付を生成
+  const daysInTargetMonth=new Date(targetYear,targetMonth+1,0).getDate();
+  const targetDates=[];
+  for(let d=1;d<=daysInTargetMonth;d++){
+    targetDates.push(`${targetYM}-${String(d).padStart(2,'0')}`);
+  }
 
-      // 算定期限超過後は月13単位まで。基本表からの一括反映でも同じ制限を適用。
-      if(isOverDeadline(pat.pid)){
-        const usedUnits=await countMonthlyBookingUnits(pat.pid,ym);
-        if(usedUnits+2>13){limit++;continue;}
-      }
-
-      const r=await dbBookSlot(ds,pat.therapist,pat.time,pat.pid,2);
-      if(r.ok){
-        registered++;
-      }else{
-        // DB上の重複などは安全側にスキップ。
-        errorCount++;
+  let successCount=0,skipCount=0;
+  for(const [pid,pats] of Object.entries(prevPatterns)){
+    const p=patients[pid];if(!p)continue;
+    for(const pat of pats){
+      // 反映先の月の同じ曜日の日付（カレンダーに存在する曜日のみ）
+      const targets=targetDates.filter(ds=>parseLocalDate(ds).getDay()===pat.dow);
+      for(const ds of targets){
+        if(isTherapistOff(ds,pat.therapist)){skipCount++;continue;}
+        if(!isSlotAvailable(ds,pat.time,pat.therapist)){skipCount++;continue;}
+        if(isOverDeadline(pid)){
+          const cnt=countMonthlyBookings(pid,targetYM);
+          if(cnt>=6){skipCount++;continue;}
+        }
+        ensureBookingShape(ds);
+        if(bookings[ds]?.[pat.therapist]?.[pat.time]){skipCount++;continue;}
+        const r=await dbBookSlot(ds,pat.therapist,pat.time,pid);
+        if(r.ok)successCount++;else skipCount++;
       }
     }
   }
 
-  await dbAddNotification(`${getStaffName(therapist)} ${ym} 基本表一括反映：${registered}件登録、既存${duplicate}件スキップ`,'admin');
-  await dbLog('admin','basic_booking_reflect',`${getStaffName(therapist)} ${ym} 基本表一括反映：登録${registered} 既存${duplicate} 営業外${closed} 期限超過${limit} エラー${errorCount}`);
-  await reloadBookings();
-  renderWeekTable();
-  renderTodaySchedule();
-  renderNotifications();
-
-  const msg=`${getStaffName(therapist)} ${ym}：${registered}件登録しました。既存予約${duplicate}件、営業外${closed}件、期限13単位上限${limit}件、登録失敗${errorCount}件。`;
-  if(resultEl)resultEl.textContent=msg;
-  showToast(`${ym}の基本表一括反映が完了しました（${registered}件）`,'#34C759');
-  if(btn){btn.disabled=false;btn.textContent='📅 指定月に一括反映する';}
+  await dbAddNotification(`${py}年${pm}月の予約パターンを${targetYear}年${targetMonthNum}月に一括反映：${successCount}件登録`,'admin');
+  await dbLog('admin','prev_month_reflect',`${py}/${pm}→${targetYear}/${targetMonthNum} ${successCount}件`);
+  closeModal();renderNotifications();
+  showToast(`${successCount}件を反映しました（スキップ：${skipCount}件）`,'#34C759');
 }
 
 // ---- SETTINGS ----
@@ -3786,46 +3529,20 @@ function renderSettingsDisplay(){
 
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
 // ---- 臨時営業日設定 ----
-function getSpecialDayGroups(){
-  const sorted=[...specialDays].sort((a,b)=>{
-    const d=a.special_date.localeCompare(b.special_date);
-    if(d!==0)return d;
-    const t=a.therapist.localeCompare(b.therapist);
-    if(t!==0)return t;
-    return timeMins(a.time_slot)-timeMins(b.time_slot);
-  });
-  const groups=[];
-  sorted.forEach(row=>{
-    const prev=groups[groups.length-1];
-    const rowMin=timeMins(row.time_slot);
-    if(prev&&prev.special_date===row.special_date&&prev.therapist===row.therapist&&prev.endMin===rowMin){
-      prev.rows.push(row);prev.endMin=rowMin+20;
-    }else{
-      groups.push({special_date:row.special_date,therapist:row.therapist,startMin:rowMin,endMin:rowMin+20,rows:[row]});
-    }
-  });
-  return groups;
-}
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
   if(!specialDays.length){el.innerHTML='<div class="empty">臨時営業日の登録はありません</div>';return;}
-  const groups=getSpecialDayGroups();
-  el.innerHTML=groups.map((g,idx)=>{
-    const d=parseLocalDate(g.special_date);
+  const sorted=[...specialDays].sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
+  el.innerHTML=sorted.map(s=>{
+    const d=parseLocalDate(s.special_date);
     const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
-    const start=`${Math.floor(g.startMin/60)}:${String(g.startMin%60).padStart(2,'0')}`;
-    const end=`${Math.floor(g.endMin/60)}:${String(g.endMin%60).padStart(2,'0')}`;
-    const mins=g.endMin-g.startMin;
-    const units=Math.round(mins/20);
-    const ids=g.rows.map(r=>r.id).join(',');
     return `<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1">
-        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${start}〜${end}</span>
-        <span class="chip" style="margin-left:6px;${staffChipStyle(g.therapist)}">${getStaffName(g.therapist)}</span>
-        <span style="font-size:11px;color:#8E8E93;margin-left:6px">${mins}分・${units}単位</span>
+        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
+        <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
       </div>
-      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDayGroup('${ids}')">削除</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button>
     </div>`;
   }).join('');
 }
@@ -3833,72 +3550,35 @@ async function addSpecialDay(){
   const ds=document.getElementById('sp-date').value;
   const th=document.getElementById('sp-th').value;
   const timeVal=document.getElementById('sp-time').value;
-  const endTimeVal=document.getElementById('sp-end-time').value;
   const err=document.getElementById('sp-err');
   err.style.display='none';
   if(!ds){err.textContent='日付を選択してください';err.style.display='block';return;}
-  if(!timeVal){err.textContent='開始時間を選択してください';err.style.display='block';return;}
-  if(!endTimeVal){err.textContent='終了時間を選択してください';err.style.display='block';return;}
-  const startMin=timeMins(timeVal);
-  const endMin=timeMins(endTimeVal);
-  const duration=endMin-startMin;
-  if(duration<=0){err.textContent='終了時間は開始時間より後に設定してください';err.style.display='block';return;}
-  if(startMin%20!==0||endMin%20!==0){err.textContent='開始時間・終了時間は20分単位で設定してください';err.style.display='block';return;}
-  if(duration%20!==0){err.textContent='開始時間〜終了時間は20分単位で設定してください';err.style.display='block';return;}
-  const segments=[];
-  for(let offset=0;offset<duration;offset+=20){
-    const seg=addMinutesToTime(timeVal,offset);
-    segments.push(normalizeTime(seg));
+  if(!timeVal){err.textContent='時間を入力してください';err.style.display='block';return;}
+  const fmtTime=timeVal.split(':').map((v,i)=>i===0?parseInt(v):v).join(':');
+  const normTime=normalizeTime(fmtTime);
+  if(specialDays.some(s=>s.special_date===ds&&s.therapist===th&&normalizeTime(s.time_slot)===normTime)){
+    err.textContent='この臨時営業日・時間は既に登録されています';err.style.display='block';return;
   }
-  // 既存の臨時営業・通常枠・予約と時間が重なる部分がある場合は登録しない。
-  const existingSpecial=getSpecialTimesForDay(ds,th);
-  if(segments.some(t=>existingSpecial.includes(t))){
-    err.textContent='指定した時間帯に既に臨時営業が登録されています。時間が重ならない範囲で登録してください';err.style.display='block';return;
-  }
-  const dow=parseLocalDate(ds).getDay();
-  const normalTimes=slotDefsForDay(dow,th);
-  // 通常枠が存在する時間を臨時営業として二重登録する必要はないため、重複を避ける。
-  if(segments.some(t=>normalTimes.includes(t))){
-    err.textContent='指定した時間帯に通常の予約枠が含まれています。時間が重ならない範囲で登録してください';err.style.display='block';return;
-  }
-  // 既存予約との時間重複を確認（予約がある部分を臨時営業に設定しない）。
-  const {data:bkRows,error:bkErr}=await sb.from('bookings').select('time_slot,status,unit').eq('booking_date',ds).eq('therapist',th);
-  if(bkErr){console.warn('臨時営業日の予約重複確認に失敗',bkErr);}
-  const activeRows=(bkRows||[]).filter(r=>['reserved','done','noshow'].includes(r.status));
-  const overlaps=activeRows.some(r=>{
-    const rs=timeMins(r.time_slot);const ru=Number(r.unit||2);const re=rs+(ru===3?60:(ru===1?20:40));
-    return segments.some(t=>{const ss=timeMins(t),se=ss+20;return ss<re&&rs<se;});
-  });
-  if(overlaps){err.textContent='指定した時間帯に既存の予約があります。予約と重ならない時間を登録してください';err.style.display='block';return;}
-  // special_business_days テーブルは既存の time_slot 形式を維持し、20分単位の各区間を1行ずつ保存する。
-  // これにより既存DBとの互換性を保ちながら、20〜240分の任意の臨時営業時間を正確に表現する。
-  const payload=segments.map(t=>({special_date:ds,therapist:th,time_slot:t}));
-  const {data,error}=await sb.from('special_business_days').insert(payload).select();
+  const {data,error}=await sb.from('special_business_days').insert({special_date:ds,therapist:th,time_slot:fmtTime}).select().single();
   if(error){
     console.error('臨時営業日の追加に失敗',error);
     err.textContent=`追加に失敗しました（${error.message||error.code||'不明'}）`;err.style.display='block';return;
   }
-  (data||[]).forEach(row=>specialDays.push({...row,time_slot:normalizeTime(row.time_slot)}));
+  specialDays.push({...data,time_slot:normalizeTime(data.time_slot)});
   renderSpecialDaysList();updateLastUpdated();
-  const endTime=normalizeTime(addMinutesToTime(timeVal,duration));
-  await dbLog('admin','add_special_day',`${ds} ${normalizeTime(timeVal)}〜${endTime} ${duration}分・${duration/20}単位 ${getStaffName(th)}`);
-  showToast(`臨時営業日を追加しました（${duration}分・${duration/20}単位）`,'#34C759');
+  await dbLog('admin','add_special_day',`${ds} ${fmtTime} ${getStaffName(th)}`);
+  showToast('臨時営業日を追加しました','#34C759');
   renderWeekTable();
 }
-async function deleteSpecialDayGroup(idsText){
-  if(!confirm('この臨時営業時間の設定を削除しますか？'))return;
-  const ids=idsText.split(',').map(v=>Number(v)).filter(Number.isFinite);
-  if(!ids.length)return;
-  const {error}=await sb.from('special_business_days').delete().in('id',ids);
+async function deleteSpecialDay(id){
+  if(!confirm('この臨時営業日の設定を削除しますか？'))return;
+  const {error}=await sb.from('special_business_days').delete().eq('id',id);
   if(error){showToast('削除に失敗しました');return;}
-  const idSet=new Set(ids);
-  specialDays=specialDays.filter(s=>!idSet.has(Number(s.id)));
+  specialDays=specialDays.filter(s=>s.id!==id);
   renderSpecialDaysList();updateLastUpdated();
   showToast('臨時営業日を削除しました');
   renderWeekTable();
 }
-// 旧データ互換：従来の1行削除呼び出しが残っていても動作するようにする
-async function deleteSpecialDay(id){ return deleteSpecialDayGroup(String(id)); }
 
 function renderTopLinks(){
   const el=document.getElementById('top-external-links');
@@ -4255,86 +3935,23 @@ function printActuals(){const old=document.title;document.title='リハビリ実
 
 // ---- INIT ----
 async function init(){
-  const initErrors=[];
-
   try{
     await loadAllData();
-  }catch(e){
-    // loadAllDataは通常throwしないが、予期しない処理エラーは記録する。
-    console.error('初期データ処理エラー',e);
-    initErrors.push({label:'初期処理',error:e});
-  }
-
-  try{
     await ensureTentativePatients();
+    document.getElementById('top-clinic-name').textContent=clinicName;
+    renderTopSubtitle();
+    renderReminder();
+    renderSettingsDisplay();
+    renderTopLinks();
   }catch(e){
-    console.error('仮予約患者の初期化失敗',e);
-    initErrors.push({label:'仮予約患者',error:e});
-  }
-
-  const renders=[
-    ['トップ名称',()=>{const el=document.getElementById('top-clinic-name');if(el)el.textContent=clinicName;}],
-    ['トップ案内',renderTopSubtitle],
-    ['お知らせ',renderReminder],
-    ['設定表示',renderSettingsDisplay],
-    ['外部リンク',renderTopLinks]
-  ];
-
-  for(const [label,fn] of renders){
-    try{fn();}catch(e){
-      console.error(`初期表示エラー: ${label}`,e);
-      initErrors.push({label,error:e});
-    }
-  }
-
-  const all=[...loadErrors,...initErrors];
-  if(all.length){
-    const names=all.map(x=>x.label).filter(Boolean).join('、');
-    console.warn('初期化中のエラー',all);
-    setTimeout(()=>{
-      showToast(`取得できなかった項目：${names}。画面は利用できます。`,'#B00020');
-    },300);
-  }
-
-  const overlay=document.getElementById('loading-overlay');
-  if(overlay)overlay.style.display='none';
-  const app=document.getElementById('app');
-  if(app)app.style.display='block';
-}
-
-// 初期データ再読み込み
-async function retryInitialDataLoad(){
-  const btn=document.getElementById('initial-reload-btn');
-  if(btn){btn.disabled=true;btn.textContent='再読み込み中...';}
-  await loadAllData();
-  renderReminder();
-  renderTopSubtitle();
-  renderSettingsDisplay();
-  renderTopLinks();
-  renderTodaySchedule();
-  if(btn){btn.disabled=false;btn.textContent='データを再読み込み';}
-  if(loadErrors.length){
-    showToast(`取得できなかった項目：${loadErrors.map(x=>x.label).join('、')}`,'#B00020');
-  }else{
-    showToast('データを再読み込みしました','#34C759');
+    console.error('init error',e);
+    alert('データの読み込みに失敗しました。\nインターネット接続を確認してページを再読み込みしてください。');
+  }finally{
+    document.getElementById('loading-overlay').style.display='none';
+    document.getElementById('app').style.display='block';
   }
 }
-
-// Promise rejection / JavaScript error がDB読み込み画面を巻き込んで停止しないようにする。
-window.addEventListener('unhandledrejection',e=>{
-  console.error('Unhandled Promise rejection',e.reason);
-  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
-  const app=document.getElementById('app'); if(app)app.style.display='block';
-  setTimeout(()=>showToast(`処理中にエラーが発生しました。${String(e.reason?.message||'画面は利用できます。')}`,'#B00020'),100);
-});
-window.addEventListener('error',e=>{
-  console.error('Window error',e.error||e.message);
-  const overlay=document.getElementById('loading-overlay'); if(overlay)overlay.style.display='none';
-  const app=document.getElementById('app'); if(app)app.style.display='block';
-});
-
-// 初期化Promiseを保持し、管理者ログインから待機できるようにする。
-appDataReady=init();
+init();
 </script>
 </body>
 </html>
