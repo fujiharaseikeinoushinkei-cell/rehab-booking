@@ -95,6 +95,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .notif-approve{font-size:12px;color:#fff;background:#007AFF;border:none;border-radius:8px;padding:7px 10px;cursor:pointer;min-width:56px;font-family:inherit;font-weight:600}
 .notif-approve:disabled{background:#D1D1D6;color:#fff;cursor:default}
 .notif-approved{font-size:12px;color:#34C759;background:#EAF9EF;border:1px solid #B7E8C7;border-radius:8px;padding:6px 8px;white-space:nowrap}
+.notif-delete{width:30px;height:30px;border:1px solid #D1D1D6;border-radius:50%;background:#fff;color:#8E8E93;font-size:20px;line-height:26px;padding:0;cursor:pointer;font-family:inherit;flex-shrink:0}.notif-delete:hover{background:#F2F2F7;color:#1C1C1E}
 .th-btn{padding:9px 18px;border-radius:10px;border:1px solid #D1D1D6;cursor:pointer;font-size:14px;font-family:inherit;background:#fff;color:#1C1C1E;font-weight:500;min-height:44px}
 .th-btn.active-t{background:#E0F0FF;border-color:#007AFF;color:#0056CC;font-weight:600}
 .th-btn.active-f{background:#EDE8FF;border-color:#7C5CBF;color:#5E35B1;font-weight:600}
@@ -2204,15 +2205,33 @@ function patientLogin(){
   } else {err.style.display='block';}
 }
 
+function getWeekdayLabelFromMonthDay(month,day){
+  const y=(typeof TODAY!=='undefined' && TODAY instanceof Date)?TODAY.getFullYear():new Date().getFullYear();
+  const d=new Date(y,Number(month)-1,Number(day));
+  return ['日','月','火','水','木','金','土'][d.getDay()];
+}
+function getDismissedStaffReplyIds(pid){
+  try{return new Set(JSON.parse(localStorage.getItem('staffReplyDismissed_'+String(pid))||'[]').map(String));}
+  catch(e){return new Set();}
+}
+function dismissStaffReply(id){
+  if(!currentPid)return;
+  const ids=getDismissedStaffReplyIds(currentPid);
+  ids.add(String(id));
+  try{localStorage.setItem('staffReplyDismissed_'+String(currentPid),JSON.stringify(Array.from(ids)));}catch(e){console.warn('担当者通知の削除状態を保存できません',e);}
+  renderMyBook();
+}
+
 function renderMyBook(){
   const upcoming=getPatientUpcoming(currentPid);
   const el=document.getElementById('ptab-mybook');
   if(!el)return;
 
   // 管理者が承認した「キャンセル・追加」の確認メッセージを、現在の予約一覧の上に表示する。
+  const dismissedStaffReplies=getDismissedStaffReplyIds(currentPid);
   const staffReplies=notifications
-    .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n))
-    .map(n=>({id:n.id,text:String(n.text).split(STAFF_REPLY_MARK)[1]?.trim()||'',time:n.time}))
+    .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n) && !dismissedStaffReplies.has(String(n.id)))
+    .map(n=>({id:n.id,text:getStaffReplyText(n),time:n.time}))
     .filter(x=>x.text)
     .slice(0,10);
 
@@ -2220,9 +2239,10 @@ function renderMyBook(){
   if(staffReplies.length){
     html+=`<div style="margin-bottom:14px">
       <div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>
-      ${staffReplies.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px">
-        <div style="font-size:14px;line-height:1.6">${r.text}</div>
-        <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div>
+      ${staffReplies.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6">${r.text}</div>
+        <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div></div>
+        <button class="notif-delete" title="通知を削除" onclick="dismissStaffReply('${r.id}')">×</button>
       </div>`).join('')}
     </div>`;
   }
@@ -2533,9 +2553,14 @@ function getStaffReplyText(n){
   // キャンセル：例「内藤 武子（nt12466）が 9/13 16:10 をキャンセル（理由：...）」
   let m=msg.match(/(?:が\s+)?(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})\s+をキャンセル/);
   if(m)return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　キャンセル　確認しました。`;
-  // 追加：例「内藤 武子（nt12466）が 9月13日（火）16:10（PT 田中）に予約」
-  m=msg.match(/(?:が\s+)(\d{1,2})月(\d{1,2})日(?:（[^）]*）)?\s+(\d{1,2}:\d{2})/);
-  if(m && msg.includes('に予約'))return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　追加　確認しました。`;
+  // 追加：患者側には「9/18 金曜 16:50（PT 田中）に予約」の形式で表示する。
+  m=msg.match(/(?:が\s+)(\d{1,2})月(\d{1,2})日(?:（([^）]*)）)?\s+(\d{1,2}:\d{2})(?:（([^）]*)）)?\s*に予約/);
+  if(m){
+    const ymdMonth=Number(m[1]), ymdDay=Number(m[2]);
+    const dow=m[3]?`${m[3]}曜`:getWeekdayLabelFromMonthDay(ymdMonth,ymdDay);
+    const staff=m[5]||'';
+    return `${ymdMonth}/${ymdDay} ${dow} ${m[4]}${staff?`（${staff}）`:''}に予約`;
+  }
   // 将来の表記揺れに備えたフォールバック
   m=msg.match(/(?:が\s+)(\d{1,2})\/(\d{1,2})\s+(\d{1,2}:\d{2})/);
   if(m && msg.includes('予約'))return `${Number(m[1])}月${Number(m[2])}日${m[3].replace(':','：')}　追加　確認しました。`;
@@ -2567,11 +2592,9 @@ function renderNotifications(){
       let action='';
       if(type==='patient' && change){
         action=approved
-          ? `<div class="notif-approved">承認済</div>`
+          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${n.id})">×</button></div>`
           : `<button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button>`;
       }else if(type==='admin'){
-        action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
-      }else{
         action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
       }
       return `<div class="notif-item" id="ni-${n.id}">
