@@ -351,6 +351,22 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
     <div id="notif-list"></div>
     <div id="notif-empty" class="empty" style="display:none">✅ 未確認のお知らせはありません</div>
+
+    <!-- 患者へメッセージ -->
+    <div style="margin-top:22px;padding-top:16px;border-top:1px solid #E5E5EA">
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">💬 患者へメッセージ</div>
+      <div class="card" style="margin:0">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+          <button class="btn btn-sm" id="patient-message-select-btn" onclick="openPatientMessageModal()">患者を選択</button>
+          <div id="patient-message-selected" style="font-size:13px;color:#8E8E93;flex:1">患者が選択されていません</div>
+        </div>
+        <div class="input-group" style="margin-bottom:10px">
+          <label>メッセージ（自由記載）</label>
+          <textarea id="patient-message-text" rows="4" placeholder="患者へ伝える内容を入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <button class="btn btn-primary btn-block" id="patient-message-send-btn" onclick="sendPatientMessage()">送信</button>
+      </div>
+    </div>
   </div>
 
   <!-- 週間スケジュール表 -->
@@ -1398,6 +1414,100 @@ async function dbAddNotification(text, operator=null){
   return true;
 }
 
+const PATIENT_MESSAGE_MARK='【患者へメッセージ】';
+let selectedPatientMessageId='';
+
+async function dbAddPatientMessage(patientId,text){
+  if(getCurrentActor()!=='admin')return {ok:false,reason:'管理者ログイン中のみ送信できます'};
+  const pid=String(patientId||'').trim();
+  const msg=String(text||'').trim();
+  if(!pid || !patients[pid])return {ok:false,reason:'患者を選択してください'};
+  if(!msg)return {ok:false,reason:'メッセージを入力してください'};
+
+  // notifications の operator は「送信先患者ID」として使用する。
+  // 送信者は operation_logs に admin として記録する。
+  const storedMessage=`${PATIENT_MESSAGE_MARK}\n${msg}`;
+  const {data,error}=await sb.from('notifications')
+    .insert({message:storedMessage,operator:pid})
+    .select().single();
+  if(error){
+    console.error('患者へのメッセージ保存失敗:',error);
+    return {ok:false,reason:'メッセージの送信に失敗しました'};
+  }
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
+  await dbLog('admin','patient_message',`${pid}：${msg}`);
+  return {ok:true};
+}
+
+function getPatientMessageText(n){
+  return String(n?.text||'').replace(new RegExp('^'+PATIENT_MESSAGE_MARK.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*'),'').trim();
+}
+
+function renderPatientMessageSelected(){
+  const el=document.getElementById('patient-message-selected');
+  const btn=document.getElementById('patient-message-select-btn');
+  const p=selectedPatientMessageId?patients[selectedPatientMessageId]:null;
+  if(el)el.textContent=p?`${selectedPatientMessageId}：${p.name}`:'患者が選択されていません';
+  if(btn)btn.textContent=p?'患者を変更':'患者を選択';
+}
+
+function openPatientMessageModal(){
+  if(getCurrentActor()!=='admin'){showToast('管理者ログイン中のみ利用できます');return;}
+  const entries=Object.entries(patients).filter(([id])=>!isArchivedPatient(id));
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">👤 患者を選択</div>
+    <div class="input-group" style="margin-bottom:10px">
+      <label>患者ID・漢字・カタカナ・ふりがなで検索</label>
+      <input type="text" id="pm-search" placeholder="患者IDまたは名前を入力" autocomplete="off" oninput="filterPatientMessageList()">
+    </div>
+    <div id="pm-list" style="max-height:360px;overflow:auto;border-top:1px solid #E5E5EA"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-block" onclick="closeModal()">戻る</button>
+    </div>`);
+  renderPatientMessageList(entries);
+}
+
+function renderPatientMessageList(entries=null){
+  const listEl=document.getElementById('pm-list');
+  if(!listEl)return;
+  if(!entries){
+    const q=String(document.getElementById('pm-search')?.value||'').trim().toLowerCase();
+    entries=Object.entries(patients).filter(([id,p])=>{
+      if(isArchivedPatient(id))return false;
+      if(!q)return true;
+      return [id,p.name,p.kana,p.furigana,p.note].filter(Boolean).some(v=>String(v).toLowerCase().includes(q));
+    });
+  }
+  if(!entries.length){listEl.innerHTML='<div style="padding:18px;text-align:center;color:#8E8E93;font-size:13px">該当する患者がいません</div>';return;}
+  listEl.innerHTML=entries.map(([id,p])=>`<button type="button" onclick="selectPatientForMessage('${id.replace(/'/g,"\\'")}')" style="display:block;width:100%;text-align:left;background:#fff;border:none;border-bottom:1px solid #F2F2F7;padding:12px 4px;cursor:pointer;font-family:inherit">
+    <div style="font-size:14px;font-weight:600">${p.name||''}</div>
+    <div style="font-size:11px;color:#8E8E93;margin-top:2px">${id}${p.kana?'　'+p.kana:''}</div>
+  </button>`).join('');
+}
+
+function filterPatientMessageList(){renderPatientMessageList();}
+function selectPatientForMessage(id){
+  if(!patients[id])return;
+  selectedPatientMessageId=String(id);
+  renderPatientMessageSelected();
+  closeModal();
+}
+
+async function sendPatientMessage(){
+  if(getCurrentActor()!=='admin'){showToast('管理者ログイン中のみ送信できます');return;}
+  const text=document.getElementById('patient-message-text')?.value||'';
+  const btn=document.getElementById('patient-message-send-btn');
+  const r=await dbAddPatientMessage(selectedPatientMessageId,text);
+  if(!r.ok){showToast(r.reason||'送信に失敗しました');return;}
+  if(btn)btn.disabled=true;
+  if(document.getElementById('patient-message-text'))document.getElementById('patient-message-text').value='';
+  selectedPatientMessageId='';
+  renderPatientMessageSelected();
+  if(btn)btn.disabled=false;
+  renderNotifications();
+  showToast('患者へメッセージを送信しました','#34C759');
+}
+
 async function dbLog(operator,action,detail){
   await sb.from('operation_logs').insert({operator,action,detail});
 }
@@ -2214,11 +2324,19 @@ function getDismissedStaffReplyIds(pid){
   try{return new Set(JSON.parse(localStorage.getItem('staffReplyDismissed_'+String(pid))||'[]').map(String));}
   catch(e){return new Set();}
 }
-function dismissStaffReply(id){
+async function dismissStaffReply(id){
   if(!currentPid)return;
+  // 患者側の「×」はDBでも非表示にする。別端末・再ログイン後にも削除状態を維持する。
+  const {error}=await sb.from('notifications').update({dismissed:true}).eq('id',id).eq('operator',String(currentPid));
+  if(error){
+    console.error('担当者通知の削除失敗:',error);
+    showToast('通知の削除に失敗しました');
+    return;
+  }
   const ids=getDismissedStaffReplyIds(currentPid);
   ids.add(String(id));
   try{localStorage.setItem('staffReplyDismissed_'+String(currentPid),JSON.stringify(Array.from(ids)));}catch(e){console.warn('担当者通知の削除状態を保存できません',e);}
+  notifications=notifications.filter(n=>String(n.id)!==String(id));
   renderMyBook();
 }
 
@@ -2231,16 +2349,20 @@ function renderMyBook(){
   const dismissedStaffReplies=getDismissedStaffReplyIds(currentPid);
   const staffReplies=notifications
     .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n) && !dismissedStaffReplies.has(String(n.id)))
-    .map(n=>({id:n.id,text:getStaffReplyText(n),time:n.time}))
-    .filter(x=>x.text)
-    .slice(0,10);
+    .map(n=>({id:n.id,text:getStaffReplyText(n),time:n.time,kind:'reply'}))
+    .filter(x=>x.text);
+  const directMessages=notifications
+    .filter(n=>String(n.operator)===String(currentPid) && String(n.text||'').includes(PATIENT_MESSAGE_MARK) && !dismissedStaffReplies.has(String(n.id)))
+    .map(n=>({id:n.id,text:getPatientMessageText(n),time:n.time,kind:'message'}))
+    .filter(x=>x.text);
+  const staffItems=[...staffReplies,...directMessages].slice(0,20);
 
   let html='';
-  if(staffReplies.length){
+  if(staffItems.length){
     html+=`<div style="margin-bottom:14px">
       <div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>
-      ${staffReplies.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px;display:flex;align-items:center;gap:10px">
-        <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6">${r.text}</div>
+      ${staffItems.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">${r.text}</div>
         <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div></div>
         <button class="notif-delete" title="通知を削除" onclick="dismissStaffReply('${r.id}')">×</button>
       </div>`).join('')}
@@ -2510,6 +2632,7 @@ function adminLogin(){
     weekTableOffset=0;
     weekTableWeekendMode=false;
     populateClinicSettingsInputs();
+    renderPatientMessageSelected();
     document.getElementById('s-start').value=settings.start;
     document.getElementById('s-end').value=settings.end;
     document.getElementById('s-tstart').value=settings.tstart;
@@ -2543,6 +2666,7 @@ function isPatientBookingChange(n){
   const patientIds=new Set(Object.keys(patients||{}).map(String));
   if(!patientIds.has(String(n.operator)))return false;
   const msg=String(n.text||'');
+  if(msg.includes(PATIENT_MESSAGE_MARK))return false;
   return msg.includes('キャンセル') || msg.includes('に予約');
 }
 function getOriginalNotificationText(n){
@@ -2577,10 +2701,12 @@ function renderNotifications(){
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
-  const patientNotifs=notifications.filter(n=>n.operator && n.operator!=='admin' && patientIds.has(String(n.operator)));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
   const adminNotifs=notifications.filter(n=>n.operator==='admin');
-  const total=notifications.length;
-  cnt.textContent=total;cnt.style.display='inline-flex';empty.style.display='none';
+  const total=patientNotifs.length+adminNotifs.length;
+  cnt.textContent=total;
+  cnt.style.display=total?'inline-flex':'none';
+  empty.style.display=total?'none':'block';
 
   function buildList(list,type,showCount){
     if(!list.length)return`<div style="font-size:12px;color:#C7C7CC;padding:8px 0;text-align:center">なし</div>`;
