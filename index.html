@@ -1240,7 +1240,7 @@ async function loadAllData(){
     if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
     if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
-    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    const normSlot=normalizeTime(b.time_slot); bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='reference'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
     bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
@@ -1266,7 +1266,7 @@ function getPatientUpcoming(pid){
       Object.entries(bookings[date][th]||{}).forEach(([time,bpid])=>{
         const normT=normalizeTime(time);
         const st=bookingStatuses[date]?.[th]?.[time]||'reserved';
-        if(bpid===pid&&st!=='cancelled')
+        if(bpid===pid&&st!=='cancelled'&&st!=='reference')
           list.push({date,time:normT,therapist:th,status:st});
       });
     });
@@ -1276,7 +1276,7 @@ function getPatientUpcoming(pid){
 }
 
 // ---- DB OPS ----
-async function dbBookSlot(date,therapist,time,pid,unit=2){
+async function dbBookSlot(date,therapist,time,pid,unit=2,reference=false){
   const normTime=normalizeTime(time);
   console.log('予約開始',{booking_date:date,therapist,time_slot:normTime,patient_id:pid,unit});
 
@@ -1294,20 +1294,20 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
 
   // すでに「予約済み（reserved）」「実施済み（done）」「来なかった（noshow）」の行があれば拒否
-  if(existing && (existing.status==='reserved'||existing.status==='noshow'||existing.status==='done')){
+  if(existing && (existing.status==='reserved'||existing.status==='reference'||existing.status==='noshow'||existing.status==='done')){
     const existName=existing.patient_id&&patients[existing.patient_id]
       ?patients[existing.patient_id].name:'別の患者';
-    const reasonLabel=existing.status==='noshow'?'（来なかった扱い）':existing.status==='done'?'（実施済み）':'';
+    const reasonLabel=existing.status==='reference'?'（参考予約）':existing.status==='noshow'?'（来なかった扱い）':existing.status==='done'?'（実施済み）':'';
     return{ok:false,reason:`この時間枠（${normTime}）は${existName}さん${reasonLabel}が使用中です。別の時間をお選びください。`};
   }
 
-  // 月6回チェック（期限切れ患者のみ）
+  // 月13単位チェック（期限超過患者のみ）
   if(isOverDeadline(pid)){
     const ym=date.substring(0,7);
-    const cnt=countMonthlyBookings(pid,ym);
-    if(cnt>=6){
+    const usedUnits=await countMonthlyBookingUnits(pid,ym);
+    if(usedUnits+Number(unit||2)>13){
       const m=parseInt(ym.split('-')[1]);
-      return{ok:false,reason:`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`};
+      return{ok:false,reason:`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`};
     }
   }
 
@@ -1317,12 +1317,12 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
     // その行をUPDATEして再利用する（実施済み・振替済みの履歴は保持しない運用のため上書きしてよい）
     console.log('既存行を再利用してUPDATE',{id:existing.id,prev_status:existing.status});
     const r=await sb.from('bookings')
-      .update({patient_id:pid,status:'reserved',unit})
+      .update({patient_id:pid,status:(reference?'reference':'reserved'),unit})
       .eq('id',existing.id).select();
     inserted=r.data;error=r.error;
   } else {
     // 該当枠のレコードが一つも無い場合のみ新規INSERT
-    const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:'reserved',unit};
+    const insertData={booking_date:date,time_slot:normTime,therapist,patient_id:pid,status:(reference?'reference':'reserved'),unit};
     console.log('INSERT実行',insertData);
     const r=await sb.from('bookings').insert(insertData).select();
     inserted=r.data;error=r.error;
@@ -1344,7 +1344,7 @@ async function dbBookSlot(date,therapist,time,pid,unit=2){
   bookings[date][therapist][normTime]=pid;
   if(!bookingStatuses[date])bookingStatuses[date]={};
   if(!bookingStatuses[date][therapist])bookingStatuses[date][therapist]={};
-  bookingStatuses[date][therapist][normTime]='reserved';
+  bookingStatuses[date][therapist][normTime]=(reference?'reference':'reserved');
   if(!bookingUnits[date])bookingUnits[date]={};
   if(!bookingUnits[date][therapist])bookingUnits[date][therapist]={};
   bookingUnits[date][therapist][normTime]=unit;
@@ -1410,7 +1410,7 @@ async function reloadBookings(){
     if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
     if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
     const normSlot=normalizeTime(b.time_slot);
-    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    bookings[b.booking_date][b.therapist][normSlot]=(b.status==='reserved'||b.status==='reference'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
     bookingStatuses[b.booking_date][b.therapist][normSlot]=b.status;
     bookingUnits[b.booking_date][b.therapist][normSlot]=b.unit||2;
   });
@@ -1726,8 +1726,6 @@ function renderTodaySchedule(){
   const el=document.getElementById('today-schedule');
   if(!el)return;
   const ds=dateStr(TODAY);
-  const dow=TODAY.getDay();
-  const clinicClosed=isHoliday(ds)||dow===0;
   ensureBookingShape(ds);
 
   if(!staffList.length){
@@ -1738,9 +1736,7 @@ function renderTodaySchedule(){
   let html='<div style="display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch">';
   staffList.forEach(s=>{
     const th=s.id;
-    const specialOpen=hasSpecialBusinessDay(ds,th);
-    const closed=clinicClosed&&!specialOpen;
-    const times=closed?[]:timesForDate(ds,th).sort((a,b)=>{
+    const times=timesForDate(ds,th).sort((a,b)=>{
       const [ah,am]=a.split(':').map(Number);
       const [bh,bm]=b.split(':').map(Number);
       return (ah*60+am)-(bh*60+bm);
@@ -1749,21 +1745,35 @@ function renderTodaySchedule(){
     html+=`<div class="card" style="flex:1 0 250px;max-width:360px;padding:10px 12px;margin:0">
       <div style="font-size:14px;font-weight:700;padding:2px 2px 9px;margin-bottom:4px;border-bottom:1px solid #E5E5EA;white-space:nowrap">${s.name}</div>`;
 
-    if(closed){
-      html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:18px 4px">🔴 本日は休診日です</div>';
-    }else if(!times.length){
+    if(!times.length){
       html+='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:18px 4px">本日の予約枠はありません</div>';
     }else{
+      let visibleCount=0;
       times.forEach(t=>{
         const pid=bookings[ds]?.[th]?.[t];
         const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
         const empty=!pid;
-        html+=`<div class="sched-row" style="min-width:0">
+        const slotOff=!isSlotAvailable(ds,t,th);
+        if(slotOff){
+          const lv=isLeave(ds,th);
+          const lvFull=lv&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
+          const reason=lvFull?'休暇':(isDayOff(ds)||isHolidayPeriodOff(ds,t)||isAfternoonOff(ds,t)||isMorningOff(ds,t)?'休診':'休');
+          html+=`<div class="sched-row" style="min-width:0;opacity:.65;cursor:default" title="週間表と同じ休診・休暇設定を反映しています">
+            <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
+            <span class="sched-name" style="color:#9CA3AF;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${reason}</span>
+          </div>`;
+          return;
+        }
+        visibleCount++;
+        html+=`<div class="sched-row" style="min-width:0;cursor:pointer" onclick="${empty?`weekTableBookModal('${ds}','${th}','${t}')`:`weekTableStatusModal('${ds}','${th}','${t}')`}" title="${empty?'クリックして予約登録':'クリックして実施済・キャンセル等を変更'}">
           <span class="sched-time" style="font-weight:600;flex:0 0 42px;font-size:11px">${t}</span>
           <span class="sched-name" title="${empty?'空き':(patients[pid]?.name||'不明')}" style="${empty?'color:#C7C7CC':'font-weight:500'};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${empty?'空き':(patients[pid]?.name||'不明')}</span>
           ${!empty?statusChip(status):'<span class="chip chip-open" style="font-size:10px;flex:0 0 auto">空き</span>'}
         </div>`;
       });
+      if(visibleCount===0){
+        html+='<div style="text-align:center;color:#B00020;font-size:12px;padding:8px 4px">🔴 本日は予約可能な時間帯がありません</div>';
+      }
     }
     html+='</div>';
   });
@@ -1844,7 +1854,7 @@ async function loadWeekTableBookings(ws){
       if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
       if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
       const t=normalizeTime(b.time_slot);
-      bookings[b.booking_date][b.therapist][t]=(b.status==='reserved'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+      bookings[b.booking_date][b.therapist][t]=(b.status==='reserved'||b.status==='reference'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
       bookingStatuses[b.booking_date][b.therapist][t]=b.status;
       bookingUnits[b.booking_date][b.therapist][t]=b.unit||2;
     });
@@ -1926,7 +1936,7 @@ async function renderWeekTable(){
     const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
-    html+=`<th colspan="${THERAPISTS.length}" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W}">
+    html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると一括実施済・一括キャンセルを選択できます">
       <div style="font-weight:600">${dayLabel}</div>
       <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
       ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
@@ -1975,9 +1985,9 @@ async function renderWeekTable(){
           function unitLine(uPid,uStatus,uTime,small){
             const name=patients[uPid].name;
             const tentative=isTentativePatient(uPid);
-            const bg=uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
-            const lbl=uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
-            const nameStyle=uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer')?`color:${TENTATIVE_FG};`:'';
+            const bg=uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
+            const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
+            const nameStyle=uStatus==='reference'?'color:#7A5A00;':uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer'&&uStatus!=='reference')?`color:${TENTATIVE_FG};`:'';
             return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${uTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
               <div title="${name}" style="font-size:${small?'8px':'10px'};font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;${nameStyle}">${name}</div>
               ${lbl?`<div style="font-size:8px;color:#6B7280">${lbl}</div>`:''}
@@ -2021,6 +2031,63 @@ async function renderWeekTable(){
   el.innerHTML=html;
   const sumEl=document.getElementById('weektable-summary');
   if(sumEl)sumEl.innerHTML=isWeekendView?'<div style="font-size:11px;color:#8E8E93;margin-top:4px">※ 土曜日・日曜日に営業がある場合のみ表示しています。</div>':'';
+}
+
+function weekTableBulkDoneModal(ds){
+  const d=parseLocalDate(ds);
+  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const counts=staffList.map(s=>{
+    const statuses=bookingStatuses[ds]?.[s.id]||{};
+    const reserved=Object.values(statuses).filter(st=>st==='reserved').length;
+    const done=Object.values(statuses).filter(st=>st==='done').length;
+    const cancellable=reserved+done;
+    return {id:s.id,name:s.name,reserved,done,cancellable};
+  });
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">${m}月${day}日（${wd}）の一括処理</div>
+    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px;line-height:1.6">担当者を選択してください。「すべて実施済」は予約中の予約を実施済にします。「すべてキャンセル」は予約中＋すでに実施済の予約をすべてキャンセルします。</p>
+    <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px">
+      ${counts.map(c=>`<div style="border:1px solid #E5E5EA;border-radius:12px;padding:10px">
+        <div style="font-weight:600;margin-bottom:8px">${c.name}<span style="font-size:11px;color:#8E8E93;margin-left:6px">予約中 ${c.reserved}件${c.done?` ／ 実施済 ${c.done}件`:''}</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <button class="btn btn-green" onclick="weekTableBulkDone('${ds}','${c.id}')">すべて実施済</button>
+          <button class="btn" style="background:#FEE2E2;color:#B91C1C;border:1px solid #FECACA" onclick="weekTableBulkCancel('${ds}','${c.id}')">すべてキャンセル</button>
+        </div>
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
+}
+async function weekTableBulkDone(ds,therapist){
+  const statuses=bookingStatuses[ds]?.[therapist]||{};
+  const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved').map(([t])=>normalizeTime(t));
+  if(!targetTimes.length){ showToast('実施済に変更する「予約中」の予約はありません'); return; }
+  const ok=confirm(`${getStaffName(therapist)}の${ds}の予約をすべて実施済にしますか？\n対象：${targetTimes.length}件`);
+  if(!ok)return;
+  const {data,error}=await sb.from('bookings').update({status:'done'}).eq('booking_date',ds).eq('therapist',therapist).eq('status','reserved').select('id,patient_id,time_slot,unit');
+  if(error){ console.error('一括実施済更新失敗',error); showToast('一括更新に失敗しました。時間をおいて再度お試しください。'); return; }
+  (data||[]).forEach(r=>{
+    const t=normalizeTime(r.time_slot);
+    if(!bookingStatuses[ds])bookingStatuses[ds]={}; if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={}; bookingStatuses[ds][therapist][t]='done';
+    if(!bookingUnits[ds])bookingUnits[ds]={}; if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={}; bookingUnits[ds][therapist][t]=r.unit||2;
+  });
+  await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「実施済」に変更【管理者】`,'admin');
+  closeModal(); await reloadBookings(); await renderWeekTable(); renderTodaySchedule(); renderNotifications(); showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件を実施済にしました`,'#34C759');
+}
+async function weekTableBulkCancel(ds,therapist){
+  const statuses=bookingStatuses[ds]?.[therapist]||{};
+  const targetTimes=Object.entries(statuses).filter(([t,st])=>st==='reserved'||st==='done').map(([t])=>normalizeTime(t));
+  if(!targetTimes.length){ showToast('キャンセルする「予約中・実施済」の予約はありません'); return; }
+  const ok=confirm(`${getStaffName(therapist)}の${ds}の予約（実施済を含む）をすべてキャンセルしますか？\n対象：${targetTimes.length}件`);
+  if(!ok)return;
+  const {data,error}=await sb.from('bookings').update({status:'cancelled'}).eq('booking_date',ds).eq('therapist',therapist).in('status',['reserved','done']).select('id,patient_id,time_slot,unit');
+  if(error){ console.error('一括キャンセル更新失敗',error); showToast('一括キャンセルに失敗しました。時間をおいて再度お試しください。'); return; }
+  (data||[]).forEach(r=>{
+    const t=normalizeTime(r.time_slot);
+    if(!bookingStatuses[ds])bookingStatuses[ds]={}; if(!bookingStatuses[ds][therapist])bookingStatuses[ds][therapist]={}; bookingStatuses[ds][therapist][t]='cancelled';
+    if(!bookingUnits[ds])bookingUnits[ds]={}; if(!bookingUnits[ds][therapist])bookingUnits[ds][therapist]={}; bookingUnits[ds][therapist][t]=r.unit||2;
+  });
+  await dbAddNotification(`${getStaffName(therapist)} ${ds} の予約を一括で「キャンセル」に変更（実施済を含む）【管理者】`,'admin');
+  closeModal(); await reloadBookings(); await renderWeekTable(); renderTodaySchedule(); renderNotifications(); showToast(`${getStaffName(therapist)}の予約${(data||[]).length}件をキャンセルしました`,'#FF3B30');
 }
 
 function weekTableBookModal(ds,therapist,time){
@@ -2147,10 +2214,10 @@ async function weekTableDoBook(ds,therapist,time){
 
   if(isOverDeadline(pid)){
     const ym=ds.substring(0,7);
-    const cnt=countMonthlyBookings(pid,ym);
-    if(cnt>=6){
+    const usedUnits=await countMonthlyBookingUnits(pid,ym);
+    if(usedUnits+unit>13){
       const m=parseInt(ym.split('-')[1]);
-      err.textContent=`${m}月の予約が既に6回入っています。制度上、期限切れ後は月6回までしか予約できません。`;
+      err.textContent=`リハビリ算定期限を超えているため追加予約できません。詳しくは電話または担当者に確認して下さい。`;
       err.style.display='block';return;
     }
   }
@@ -2176,8 +2243,8 @@ async function weekTableDoBook(ds,therapist,time){
       const nds=dateStr(nd);
       if(isTherapistOff(nds,therapist)||nd.getDay()===0)continue;
       if(isOverDeadline(pid)){
-        const cnt=countMonthlyBookings(pid,nds.substring(0,7));
-        if(cnt>=6)break;
+        const usedUnits=await countMonthlyBookingUnits(pid,nds.substring(0,7));
+        if(usedUnits+2>13)break;
       }
       // DBから最新状態を確認して重複チェック
       if(!bookings[nds]?.[therapist]?.[normTime]){
@@ -2204,6 +2271,16 @@ function weekTableStatusModal(ds,therapist,time){
   const d=new Date(ds);
   const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
   const status=bookingStatuses[ds]?.[therapist]?.[time]||'reserved';
+  if(status==='reference'){
+    openModal(`<div class="modal-handle"></div>
+      <div class="modal-title">参考予約</div>
+      <p style="font-size:14px;font-weight:600;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
+      <p style="font-size:13px;color:#8E8E93;margin-bottom:8px">${getStaffName(therapist)} ／ ${p?p.name:'不明'}</p>
+      <div style="background:#FFF7CC;border:1px solid #F0D76A;border-radius:8px;padding:10px 12px;font-size:12px;color:#7A5A00;margin-bottom:14px">この予約は「基本表 → 指定月に一括反映する」で登録された参考予約です。</div>
+      <button class="btn btn-block btn-primary" onclick="wtConfirmReference('${ds}','${therapist}','${time}')">予約確定</button>
+      <button class="btn btn-block" style="margin-top:8px" onclick="closeModal()">閉じる</button>`);
+    return;
+  }
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">予約詳細</div>
     <p style="font-size:14px;font-weight:600;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
@@ -2217,6 +2294,25 @@ function weekTableStatusModal(ds,therapist,time){
     <p style="font-size:11px;color:#8E8E93;margin-bottom:12px;line-height:1.6">①キャンセル：枠を空きに戻します　／　②来なかった：予約はあったが患者さんが来院しなかった場合。枠は埋まったまま、赤色で表示されます。</p>
     <button class="btn btn-block" onclick="closeModal()">閉じる</button>`);
 }
+async function wtConfirmReference(ds,therapist,time){
+  const normTime=normalizeTime(time);
+  const {data,error}=await sb.from('bookings').update({status:'reserved'})
+    .eq('booking_date',ds).eq('therapist',therapist)
+    .eq('time_slot',normTime).eq('status','reference').select('patient_id');
+  if(error || !data?.length){
+    console.error('参考予約の確定に失敗',error);
+    showToast('予約確定に失敗しました。画面を更新して再度お試しください。','#FF3B30');
+    return;
+  }
+  await dbAddNotification(`${await resolvePatientName(data[0].patient_id)} ${ds} ${normTime} を「予約確定」に変更【管理者】`,'admin');
+  await reloadBookings();
+  closeModal();
+  renderWeekTable();
+  renderTodaySchedule();
+  renderNotifications();
+  showToast('予約を確定しました','#34C759');
+}
+
 async function wtUpdateStatus(ds,therapist,time,status){
   const r=await dbUpdateStatus(ds,therapist,time,status);
   if(!r.ok){showToast('更新に失敗しました');return;}
@@ -2717,12 +2813,12 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
     return;
   }
 
-  // 期限切れ患者の月6回チェック
+  // 期限超過患者の月13単位チェック
   if(isOverDeadline(currentPid)){
     const ym=fullDate.substring(0,7);
-    const cnt=countMonthlyBookings(currentPid,ym);
-    if(cnt>=6){
-      document.getElementById('res-err').textContent='制度上月6回しか予約できません';
+    const usedUnits=await countMonthlyBookingUnits(currentPid,ym);
+    if(usedUnits+2>13){
+      document.getElementById('res-err').textContent='リハビリ算定期限超過後は月13単位までしか予約できません';
       document.getElementById('res-err').style.display='block';
       return;
     }
@@ -3473,22 +3569,6 @@ async function doExcelImport(){
 
 // ---- ADMIN BOOKING ----
 
-// 月間予約件数チェック（期限超過患者は月6回まで）
-function countMonthlyBookings(pid,yearMonth){
-  // yearMonth: "2025-07" 形式
-  let count=0;
-  Object.keys(bookings).forEach(date=>{
-    if(!date.startsWith(yearMonth))return;
-    staffList.forEach(s=>{
-      const th=s.id;
-      Object.entries(bookings[date][th]||{}).forEach(([t,bpid])=>{
-        if(bpid===pid && bookingStatuses[date]?.[th]?.[t]!=='cancelled') count++;
-      });
-    });
-  });
-  return count;
-}
-
 function isOverDeadline(pid){
   const p=patients[pid];
   if(!p||!p.deadline)return false;
@@ -3754,7 +3834,7 @@ async function applyBasicBookingMonth(){
         if(usedUnits+2>13){limit++;continue;}
       }
 
-      const r=await dbBookSlot(ds,pat.therapist,pat.time,pat.pid,2);
+      const r=await dbBookSlot(ds,pat.therapist,pat.time,pat.pid,2,true);
       if(r.ok){
         registered++;
       }else{
