@@ -1290,7 +1290,14 @@ async function dbBookSlot(date,therapist,time,pid,unit=2,reference=false){
   if(exErr) console.warn('重複チェックエラー',exErr);
 
   // 取得結果の時間を正規化して比較し、同じ枠の既存行を探す
-  const existing=(exRows||[]).find(r=>normalizeTime(r.time_slot)===normTime);
+  const requested={time_slot:normTime,status:'reserved',unit:Number(unit)||2};
+  const existing=(exRows||[]).find(r=>{
+    const existingStatus=r.status;
+    if(!['reserved','reference','noshow','done'].includes(existingStatus))return false;
+    const startA=timeMins(r.time_slot),endA=startA+(Number(r.unit)||2)*20;
+    const startB=timeMins(normTime),endB=startB+(Number(unit)||2)*20;
+    return startA<endB && startB<endA;
+  });
   console.log('既存レコード確認結果',{existing, checked_time:normTime, all_slots:(exRows||[]).map(r=>({t:r.time_slot,s:r.status}))});
 
   // すでに「予約済み（reserved）」「実施済み（done）」「来なかった（noshow）」の行があれば拒否
@@ -1619,6 +1626,30 @@ async function loadTopCalendarBookings(){
     topCalBookings={};
   }
 }
+// 空き枠判定をトップカレンダーと管理者週間表で統一するための共通判定
+// 予約開始時刻だけでなく、unit（1=20分、2=40分、3=60分…）が占有する後続時間も予約済みとして扱う。
+function bookingOccupiesTime(b,time){
+  if(!b)return false;
+  if(['reserved','reference','noshow','done'].indexOf(b.status)<0)return false;
+  const start=timeMins(b.time_slot);
+  const target=timeMins(time);
+  const units=Number(b.unit)||2;
+  return target>=start && target<start+(units*20);
+}
+function topCalBookingAt(ds,therapist,time){
+  const rows=Object.values(topCalBookings[ds]?.[therapist]||{});
+  return rows.find(b=>bookingOccupiesTime(b,time))||null;
+}
+function weekTableBookingAt(ds,therapist,time){
+  const statusMap=bookingStatuses[ds]?.[therapist]||{};
+  for(const [start,bstatus] of Object.entries(statusMap)){
+    if(['reserved','reference','noshow','done'].indexOf(bstatus)<0)continue;
+    const b={time_slot:start,status:bstatus,unit:bookingUnits[ds]?.[therapist]?.[start]||2,patient_id:bookings[ds]?.[therapist]?.[start]};
+    if(bookingOccupiesTime(b,time))return {start:normalizeTime(start),booking:b};
+  }
+  return null;
+}
+
 function topCalHasOpen(ds){
   const d=parseLocalDate(ds);
   if(d<TODAY || !isDateWithinReception(ds))return false;
@@ -1628,8 +1659,8 @@ function topCalHasOpen(ds){
     if(isDayOff(ds)&&!hasSpecialBusinessDay(ds,s.id))return false;
     return times.some(t=>{
       if(!isSlotAvailable(ds,t,s.id))return false;
-      const b=topCalBookings[ds]?.[s.id]?.[normalizeTime(t)];
-      return !b || b.status==='cancelled' || b.status==='transfer';
+      const b=topCalBookingAt(ds,s.id,t);
+      return !b;
     });
   });
 }
@@ -1974,12 +2005,16 @@ async function renderWeekTable(){
           html+=`<td style="border:1px solid #E5E7EB;background:#F3F4F6;padding:4px;text-align:center;min-width:${CELL_W};font-size:9px;color:#9CA3AF">${lvFull?'休暇':dayOff?'休診':'休'}</td>`;
         }else{
           const bottomTime=getSecondUnitTime(time);
-          const pid=bookings[ds]?.[th]?.[time];
-          const status=bookingStatuses[ds]?.[th]?.[time]||'';
-          const unit=bookingUnits[ds]?.[th]?.[time]||2;
-          const bPid=bookings[ds]?.[th]?.[bottomTime];
-          const bStatus=bookingStatuses[ds]?.[th]?.[bottomTime]||'';
-          const bUnit=bookingUnits[ds]?.[th]?.[bottomTime]||2;
+          const coverTop=weekTableBookingAt(ds,th,time);
+          const coverBottom=weekTableBookingAt(ds,th,bottomTime);
+          const pid=coverTop?.booking?.patient_id||null;
+          const status=coverTop?.booking?.status||'';
+          const unit=coverTop?.booking?.unit||2;
+          const bPid=coverBottom?.booking?.patient_id||null;
+          const bStatus=coverBottom?.booking?.status||'';
+          const bUnit=coverBottom?.booking?.unit||2;
+          const topIsStart=!!(coverTop&&coverTop.start===normalizeTime(time));
+          const bottomIsStart=!!(coverBottom&&coverBottom.start===normalizeTime(bottomTime));
           const hasTop=pid&&patients[pid];
           const hasBottom=bPid&&patients[bPid];
           function unitLine(uPid,uStatus,uTime,small){
@@ -1988,7 +2023,8 @@ async function renderWeekTable(){
             const bg=uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
             const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
             const nameStyle=uStatus==='reference'?'color:#7A5A00;':uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer'&&uStatus!=='reference')?`color:${TENTATIVE_FG};`:'';
-            return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${uTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
+            const clickTime=(small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime));
+            return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${clickTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
               <div title="${name}" style="font-size:${small?'8px':'10px'};font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;${nameStyle}">${name}</div>
               ${lbl?`<div style="font-size:8px;color:#6B7280">${lbl}</div>`:''}
             </div>`;
@@ -1997,9 +2033,10 @@ async function renderWeekTable(){
             return `<div onclick="event.stopPropagation();weekTableBookModal('${ds}','${th}','${addTime}')" style="cursor:pointer;margin-top:2px;padding:1px 0;color:#93C5FD;font-size:9px">＋追加</div>`;
           }
           if(hasTop||hasBottom){
-            const topCell=hasTop?unitLine(pid,status,time,false):(hasBottom&&bUnit===1?addLine(time):'');
-            const bottomCell=hasBottom?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&unit===1?addLine(bottomTime):'');
-            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}</td>`;
+            const topCell=hasTop&&topIsStart?unitLine(pid,status,time,false):(hasBottom&&bUnit===1&&bottomIsStart?addLine(time):'');
+            const bottomCell=hasBottom&&bottomIsStart?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&topIsStart&&unit===1?addLine(bottomTime):'');
+            const coveredOnly=(coverTop&&!topIsStart)||(coverBottom&&!bottomIsStart);
+            html+=`<td style="border:1px solid #D1D1D6;background:${coveredOnly?'#FFF7CC':'#fff'};padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}${coveredOnly?'<div style="font-size:8px;color:#7A5A00">予約中</div>':''}</td>`;
           }else{
             html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`;
           }
@@ -2425,7 +2462,16 @@ function renderPublicScreenState(){
 }
 function pubSelectTherapist(t){
   if(!isReceptionOpen())return;
-  pubTherapist=t;pubWeekOffset=0;
+  pubTherapist=t;
+  // トップカレンダーから日付指定で来た場合は、その日を含む週を表示する。
+  // 通常の「空き状況の確認」から担当者を選んだ場合だけ今週から開始する。
+  if(pubTargetDate){
+    const target=parseLocalDate(pubTargetDate);
+    const diffDays=Math.round((monday(target)-monday(TODAY))/(24*60*60*1000));
+    pubWeekOffset=Math.floor(diffDays/7);
+  }else{
+    pubWeekOffset=0;
+  }
   document.querySelectorAll('#pub-th-cards .th-select-card').forEach(card=>{
     card.classList.toggle('active',card.dataset.staffId===t);
   });
@@ -2436,6 +2482,7 @@ function pubSelectTherapist(t){
 }
 function pubResetTherapist(){
   pubTherapist=null;
+  pubTargetDate=null;
   document.getElementById('pub-th-select').style.display='block';
   document.getElementById('pub-slots-wrap').style.display='none';
 }
