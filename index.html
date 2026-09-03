@@ -859,6 +859,16 @@ function isLeaveForSlot(ds,th,time){
   return false;
 }
 
+// 予約時間全体（20分×単位数）がPT休暇にかからないかを確認する。
+// 例：40分予約なら開始時刻だけでなく、開始+20分の枠も休暇対象なら予約不可。
+function isLeaveForBooking(ds,th,startTime,unit=2){
+  const n=Math.max(1,Number(unit)||2);
+  for(let i=0;i<n;i++){
+    if(isLeaveForSlot(ds,th,addMinutesToTime(startTime,i*20)))return true;
+  }
+  return false;
+}
+
 // ---- 診療カレンダールール ----
 // 曜日×「月の第何週か」の組み合わせごとに、営業状況（終日／午前のみ／午後のみ／休診）を
 // businessHoursMatrix で管理する。管理画面「設定」タブから編集可能。
@@ -1279,6 +1289,12 @@ function getPatientUpcoming(pid){
 async function dbBookSlot(date,therapist,time,pid,unit=2,reference=false){
   const normTime=normalizeTime(time);
   console.log('予約開始',{booking_date:date,therapist,time_slot:normTime,patient_id:pid,unit});
+
+  // PT休暇（年休・半休・時間休）は予約処理側でも必ず再チェックする。
+  // 画面の空き枠表示をすり抜けた場合でも、休暇中の担当者には予約できないようにする。
+  if(isLeaveForBooking(date,therapist,normTime,unit)){
+    return{ok:false,reason:`${getStaffName(therapist)}はこの時間帯が休暇のため予約できません。別の時間をお選びください。`};
+  }
 
   // 既存レコードを「ステータス問わず」取得する
   // （cancelled/done/transferの行も含めて確認する。これらの行は削除せずDBに残っているため、
@@ -2513,7 +2529,7 @@ function renderPublicSlots(){
     }
     ensureBookingShape(ds);
     const openTimes=times
-      .filter(t=>!bookings[ds][pubTherapist][t] && isSlotAvailable(ds,t))
+      .filter(t=>!bookings[ds][pubTherapist][t] && isSlotAvailable(ds,t,pubTherapist))
       .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
