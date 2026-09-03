@@ -1027,6 +1027,40 @@ function isSpecialBusinessSlot(ds,therapist,time){
 function hasSpecialBusinessDay(ds,therapist){
   return getSpecialTimesForDay(ds,therapist).length>0;
 }
+
+// 実際に予約できる開始枠かを判定する。通常予約は40分（2単位）なので、
+// 開始時刻だけでなく2枠分が連続して空いていることを確認する。
+// 臨時営業日は「開始-終了」で登録されるため、その登録範囲内なら開始時刻から予約可能。
+function isSpecialBusinessRangeCovers(ds,therapist,time,unit=2){
+  const target=timeMins(time);
+  const endTarget=target+(Math.max(1,Number(unit)||2)-1)*20;
+  return specialDays.some(s=>{
+    if(s.special_date!==ds||s.therapist!==therapist)return false;
+    const raw=String(s.time_slot||'').trim();
+    const parts=raw.split('-').map(v=>v.trim());
+    if(parts.length<2)return normalizeTime(parts[0])===normalizeTime(time);
+    const start=timeMins(parts[0]);
+    const end=timeMins(parts[1]);
+    return target>=start&&endTarget<end;
+  });
+}
+function isBookableStart(ds,therapist,time,unit=2){
+  const n=Math.max(1,Number(unit)||2);
+  const nt=normalizeTime(time);
+  if(!isSlotAvailable(ds,nt,therapist))return false;
+  if(isSpecialBusinessRangeCovers(ds,therapist,nt,n)){
+    for(let i=0;i<n;i++){
+      if(isLeaveForSlot(ds,therapist,addMinutesToTime(nt,i*20))||isHolidayPeriodOff(ds,addMinutesToTime(nt,i*20)))return false;
+    }
+    return true;
+  }
+  const availableTimes=new Set(timesForDate(ds,therapist).map(normalizeTime));
+  for(let i=1;i<n;i++){
+    const t=addMinutesToTime(nt,i*20);
+    if(!availableTimes.has(t)||!isSlotAvailable(ds,t,therapist))return false;
+  }
+  return true;
+}
 // 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
 function timesForDate(ds,therapist){
   const dow=parseLocalDate(ds).getDay();
@@ -1674,9 +1708,12 @@ function topCalHasOpen(ds){
     if(!times.length)return false;
     if(isDayOff(ds)&&!hasSpecialBusinessDay(ds,s.id))return false;
     return times.some(t=>{
-      if(!isSlotAvailable(ds,t,s.id))return false;
-      const b=topCalBookingAt(ds,s.id,t);
-      return !b;
+      if(!isBookableStart(ds,s.id,t,2))return false;
+      for(let i=0;i<2;i++){
+        const b=topCalBookingAt(ds,s.id,addMinutesToTime(t,i*20));
+        if(b)return false;
+      }
+      return true;
     });
   });
 }
@@ -2502,18 +2539,30 @@ function pubResetTherapist(){
   document.getElementById('pub-th-select').style.display='block';
   document.getElementById('pub-slots-wrap').style.display='none';
 }
-function pubWeekNav(d){pubWeekOffset+=d;renderPublicSlots();}
+function pubWeekNav(d){
+  // 週移動したら、カレンダーから選択した特定日へのフォーカスを解除する。
+  // これにより「土曜を選択→次週」などでも表示が特定日に固定されない。
+  pubTargetDate=null;
+  pubWeekOffset+=d;
+  renderPublicSlots();
+}
 
 function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
-  const we=addDays(ws,4);
+  const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
+  const selectedDow=selectedDate?selectedDate.getDay():-1;
+  // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
+  // その選択日だけを表示する（「空きあり」なのに予約画面で空きが消える不整合を防ぐ）。
+  const selectedWeekend=selectedDate && (selectedDow===0||selectedDow===6);
+  const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4].map(i=>addDays(ws,i));
+  const labelStart=selectedWeekend?selectedDate:ws;
+  const labelEnd=selectedWeekend?selectedDate:addDays(ws,4);
   document.getElementById('pub-week-label').textContent=
-    `${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
+    `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
   let html='';let anyOpen=false;
-  for(let i=0;i<5;i++){
-    const d=addDays(ws,i);
+  for(const d of displayDates){
     const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
@@ -2529,7 +2578,7 @@ function renderPublicSlots(){
     }
     ensureBookingShape(ds);
     const openTimes=times
-      .filter(t=>!bookings[ds][pubTherapist][t] && isSlotAvailable(ds,t,pubTherapist))
+      .filter(t=>isBookableStart(ds,pubTherapist,t,2) && !weekTableBookingAt(ds,pubTherapist,t) && !weekTableBookingAt(ds,pubTherapist,addMinutesToTime(t,20)))
       .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
