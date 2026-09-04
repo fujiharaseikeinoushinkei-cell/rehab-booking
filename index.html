@@ -1085,8 +1085,8 @@ function ensureBookingShape(ds){
 
 function updateLastUpdated(){
   const now=new Date();
-  const str=now.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+'  '+
-    now.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+'  更新';
+  const str=now.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'})+'  '+
+    now.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'})+'  更新';
   document.getElementById('last-updated-footer').textContent=str;
   dbSaveSetting('last_updated',now.toISOString());
 }
@@ -1242,8 +1242,8 @@ async function loadAllData(){
       try{
         const d=new Date(r.value);
         document.getElementById('last-updated-footer').textContent=
-          d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+
-          d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 更新';
+          d.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'})+' '+
+          d.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'})+' 更新';
       }catch(e){}
     }
   });
@@ -1300,7 +1300,7 @@ async function loadAllData(){
 }
 
 function fmtTime(iso){
-  try{const d=new Date(iso);return d.toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}
+  try{const d=new Date(iso);return d.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}
 }
 
 function getPatientUpcoming(pid){
@@ -1625,7 +1625,7 @@ async function dbAddPatient(id,p){
   const {error}=await sb.from('patients').insert({
     id,name:p.name,kana:p.kana,dob:p.dob||null,gender:p.gender,
     disease:p.disease,therapist:p.therapist,
-    deadline:p.deadline?p.deadline.toISOString().split('T')[0]:null,note:p.note
+    deadline:p.deadline?p.deadline instanceof Date?dateStr(p.deadline):p.deadline:null,note:p.note
   });
   return !error;
 }
@@ -1634,7 +1634,7 @@ async function dbUpdatePatient(id,p){
   const {error}=await sb.from('patients').update({
     name:p.name,kana:p.kana,dob:p.dob||null,gender:p.gender,
     disease:p.disease,therapist:p.therapist,
-    deadline:p.deadline?p.deadline.toISOString().split('T')[0]:null,note:p.note
+    deadline:p.deadline?p.deadline instanceof Date?dateStr(p.deadline):p.deadline:null,note:p.note
   }).eq('id',id);
   return !error;
 }
@@ -1642,9 +1642,9 @@ async function dbUpdatePatient(id,p){
 async function dbDeletePatient(id){
   // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
   // 5年より古い実施済予約は削除し、未実施の予約も削除する。
-  const cutoff=new Date();
-  cutoff.setFullYear(cutoff.getFullYear()-5);
-  const cutoffStr=cutoff.toISOString().split('T')[0];
+  const cutoff=addDays(TODAY,-(5*365));
+  cutoff.setFullYear(TODAY.getFullYear()-5);
+  const cutoffStr=dateStr(cutoff);
 
   const {error:oldDoneErr}=await sb.from('bookings').delete()
     .eq('patient_id',id).eq('status','done').lt('booking_date',cutoffStr);
@@ -2988,7 +2988,7 @@ function adminLogin(){
     setActor('admin');
     document.getElementById('admin-err').style.display='none';
     document.getElementById('admin-pw').value='';
-    const now=new Date();
+    const now=getJSTToday();
     document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
     renderNotifications();renderDeadline();renderSettingsDisplay();
     renderTodaySchedule();
@@ -3481,7 +3481,7 @@ function renderDeadline(){
     else if(diff<=30){rc='row-orange';badge=`<span class="badge badge-alert">残${diff}日</span>`;}
     else if(diff<=60){rc='row-yellow';badge=`<span class="badge badge-warn">残${diff}日</span>`;}
     else{badge=`<span class="badge badge-ok">残${diff}日</span>`;}
-    html+=`<tr class="${rc}"><td>${id}</td><td>${p.name}</td><td>${p.disease}</td><td>${p.deadline.toISOString().split('T')[0]}</td><td>${badge}</td></tr>`;
+    html+=`<tr class="${rc}"><td>${id}</td><td>${p.name}</td><td>${p.disease}</td><td>${dateStr(p.deadline)}</td><td>${badge}</td></tr>`;
   });
   tb.innerHTML=html;
 }
@@ -3606,7 +3606,7 @@ async function saveNewPatient(){
   showToast(`${name} さんを登録しました`,'#34C759');
 }
 function openEditPatient(id){
-  const p=patients[id];const dl=p.deadline.toISOString().split('T')[0];
+  const p=patients[id];const dl=dateStr(p.deadline);
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">${p.name} <span style="font-size:13px;color:#8E8E93;font-weight:400">${id}</span></div>
     <div class="input-group"><label>患者名</label><input type="text" id="ep-name" value="${p.name}"></div>
@@ -3735,7 +3735,7 @@ function exportCSV(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;
-  const now=new Date();
+  const now=getJSTToday();
   a.download=`患者データ_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
   a.click();
   URL.revokeObjectURL(url);
@@ -3766,7 +3766,7 @@ function printWeekTable(){
   }
 </style></head><body>
 <h2>📋 週間スケジュール表　${label}</h2>
-<p style="font-size:10px;color:#666;margin-bottom:8px">出力日時：${new Date().toLocaleString('ja-JP')}</p>
+<p style="font-size:10px;color:#666;margin-bottom:8px">出力日時：${new Date().toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})}</p>
 ${tableHTML}
 <script>window.onload=function(){window.print();}<\/script>
 </body></html>`);
