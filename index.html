@@ -2502,30 +2502,18 @@ function pubResetTherapist(){
   document.getElementById('pub-th-select').style.display='block';
   document.getElementById('pub-slots-wrap').style.display='none';
 }
-function pubWeekNav(d){
-  // 週移動したら、カレンダーから選択した特定日へのフォーカスを解除する。
-  // これにより「土曜を選択→次週」などでも表示が特定日に固定されない。
-  pubTargetDate=null;
-  pubWeekOffset+=d;
-  renderPublicSlots();
-}
+function pubWeekNav(d){pubWeekOffset+=d;renderPublicSlots();}
 
 function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
-  const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
-  const selectedDow=selectedDate?selectedDate.getDay():-1;
-  // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
-  // その選択日だけを表示する（「空きあり」なのに予約画面で空きが消える不整合を防ぐ）。
-  const selectedWeekend=selectedDate && (selectedDow===0||selectedDow===6);
-  const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4].map(i=>addDays(ws,i));
-  const labelStart=selectedWeekend?selectedDate:ws;
-  const labelEnd=selectedWeekend?selectedDate:addDays(ws,4);
+  const we=addDays(ws,4);
   document.getElementById('pub-week-label').textContent=
-    `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
+    `${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
   let html='';let anyOpen=false;
-  for(const d of displayDates){
+  for(let i=0;i<5;i++){
+    const d=addDays(ws,i);
     const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
