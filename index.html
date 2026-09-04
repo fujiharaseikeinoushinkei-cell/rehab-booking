@@ -2124,7 +2124,10 @@ async function renderWeekTable(){
             const coveredOnly=(coverTop&&!topIsStart)||(coverBottom&&!bottomIsStart);
             html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}</td>`;
           }else{
-            html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`;
+            const openStart=isOpenStartFromCurrentCache(ds,th,time);
+            html+=openStart
+              ?`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`
+              :`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W};color:#9CA3AF"><div style="font-size:9px">—</div></td>`;
           }
         }
       });
@@ -2580,7 +2583,40 @@ function pubWeekNav(d){
   renderPublicSlots();
 }
 
-function renderPublicSlots(){
+async function refreshBookingsForDateRange(fromDate,toDate){
+  const {data,error}=await sb.from('bookings')
+    .select('booking_date,time_slot,therapist,patient_id,status,unit')
+    .gte('booking_date',fromDate).lte('booking_date',toDate);
+  if(error){console.error('予約最新値の取得失敗',error);return false;}
+  const from=parseLocalDate(fromDate), to=parseLocalDate(toDate);
+  for(let d=new Date(from);d<=to;d=addDays(d,1)){
+    const ds=dateStr(d);
+    delete bookings[ds]; delete bookingStatuses[ds]; delete bookingUnits[ds];
+  }
+  (data||[]).forEach(b=>{
+    if(!bookings[b.booking_date])bookings[b.booking_date]={};
+    if(!bookingStatuses[b.booking_date])bookingStatuses[b.booking_date]={};
+    if(!bookingUnits[b.booking_date])bookingUnits[b.booking_date]={};
+    if(!bookings[b.booking_date][b.therapist])bookings[b.booking_date][b.therapist]={};
+    if(!bookingStatuses[b.booking_date][b.therapist])bookingStatuses[b.booking_date][b.therapist]={};
+    if(!bookingUnits[b.booking_date][b.therapist])bookingUnits[b.booking_date][b.therapist]={};
+    const t=normalizeTime(b.time_slot);
+    bookings[b.booking_date][b.therapist][t]=(b.status==='reserved'||b.status==='reference'||b.status==='noshow'||b.status==='done')?b.patient_id:null;
+    bookingStatuses[b.booking_date][b.therapist][t]=b.status;
+    bookingUnits[b.booking_date][b.therapist][t]=b.unit||2;
+  });
+  return true;
+}
+
+// 「空き状況の確認」と管理者週間表で完全に同じ開始枠判定を使う。
+// 40分予約（2単位）は開始時刻＋20分の両方が空いている必要がある。
+function isOpenStartFromCurrentCache(ds,therapist,time){
+  const nt=normalizeTime(time);
+  if(!isBookableStart(ds,therapist,nt,2))return false;
+  return !weekTableBookingAt(ds,therapist,nt) && !weekTableBookingAt(ds,therapist,addMinutesToTime(nt,20));
+}
+
+async function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
@@ -2592,6 +2628,10 @@ function renderPublicSlots(){
   const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4].map(i=>addDays(ws,i));
   const labelStart=selectedWeekend?selectedDate:ws;
   const labelEnd=selectedWeekend?selectedDate:addDays(ws,4);
+  // 管理者週間表と同じDB最新値を取得してから空き状況を描画する。
+  const loadFrom=dateStr(selectedWeekend?selectedDate:ws);
+  const loadTo=dateStr(selectedWeekend?selectedDate:addDays(ws,4));
+  await refreshBookingsForDateRange(loadFrom,loadTo);
   document.getElementById('pub-week-label').textContent=
     `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
   let html='';let anyOpen=false;
@@ -2611,7 +2651,7 @@ function renderPublicSlots(){
     }
     ensureBookingShape(ds);
     const openTimes=times
-      .filter(t=>isBookableStart(ds,pubTherapist,t,2) && !weekTableBookingAt(ds,pubTherapist,t) && !weekTableBookingAt(ds,pubTherapist,addMinutesToTime(t,20)))
+      .filter(t=>isOpenStartFromCurrentCache(ds,pubTherapist,t))
       .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
