@@ -1027,6 +1027,43 @@ function isSpecialBusinessSlot(ds,therapist,time){
 function hasSpecialBusinessDay(ds,therapist){
   return getSpecialTimesForDay(ds,therapist).length>0;
 }
+
+// 実際に予約できる開始枠かを判定する。通常予約は40分（2単位）なので、
+// 開始時刻だけでなく2枠分が連続して空いていることを確認する。
+// 臨時営業日は「開始-終了」で登録されるため、その登録範囲内なら開始時刻から予約可能。
+function isSpecialBusinessRangeCovers(ds,therapist,time,unit=2){
+  const target=timeMins(time);
+  const endTarget=target+(Math.max(1,Number(unit)||2)-1)*20;
+  return specialDays.some(s=>{
+    if(s.special_date!==ds||s.therapist!==therapist)return false;
+    const raw=String(s.time_slot||'').trim();
+    const parts=raw.split('-').map(v=>v.trim());
+    if(parts.length<2)return normalizeTime(parts[0])===normalizeTime(time);
+    const start=timeMins(parts[0]);
+    const end=timeMins(parts[1]);
+    return target>=start&&endTarget<end;
+  });
+}
+function isBookableStart(ds,therapist,time,unit=2){
+  const n=Math.max(1,Number(unit)||2);
+  const nt=normalizeTime(time);
+  if(!isSlotAvailable(ds,nt,therapist))return false;
+  if(isSpecialBusinessRangeCovers(ds,therapist,nt,n)){
+    for(let i=0;i<n;i++){
+      if(isLeaveForSlot(ds,therapist,addMinutesToTime(nt,i*20))||isHolidayPeriodOff(ds,addMinutesToTime(nt,i*20)))return false;
+    }
+    return true;
+  }
+  // 通常の40分枠は「開始時刻」がslot_definitionsに登録されており、
+  // 2単位目の+20分は独立した開始枠として登録されていない。
+  // そのため「+20分がtimesForDateに存在するか」は判定条件にしない。
+  // 2単位分の実時間について、営業・休診・PT休暇だけを確認する。
+  for(let i=1;i<n;i++){
+    const t=addMinutesToTime(nt,i*20);
+    if(!isSlotAvailable(ds,t,therapist))return false;
+  }
+  return true;
+}
 // 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
 function timesForDate(ds,therapist){
   const dow=parseLocalDate(ds).getDay();
@@ -1353,11 +1390,33 @@ async function dbBookSlot(date,therapist,time,pid,unit=2,reference=false){
 
   if(error){
     console.error('予約処理失敗',{code:error.code,message:error.message,details:error.details,hint:error.hint});
-    let reason=`予約処理に失敗しました（${error.message||error.code||'不明'}）`;
-    if(error.code==='23505') reason='この時間枠は既に予約済みです。画面を更新して再度お試しください。';
-    else if(error.code==='23503') reason='患者IDの照合に失敗しました。患者管理で登録を確認してください。';
-    else if(error.code==='42501') reason='アクセス権限エラーです。管理者にお問い合わせください（RLS）。';
-    return{ok:false,reason};
+    // UNIQUE制約(23505)が返った場合は、同一開始枠の既存行を再確認する。
+    // 画面キャッシュではなくDBを正として、キャンセル済み行ならその行を再利用する。
+    if(error.code==='23505'){
+      const {data:dupRows,error:dupErr}=await sb.from('bookings')
+        .select('id,patient_id,time_slot,status,unit')
+        .eq('booking_date',date).eq('therapist',therapist).eq('time_slot',normTime);
+      if(!dupErr && dupRows?.length){
+        const dup=dupRows.find(r=>!['reserved','reference','noshow','done'].includes(r.status)) || dupRows[0];
+        if(dup && !['reserved','reference','noshow','done'].includes(dup.status)){
+          const rr=await sb.from('bookings').update({patient_id:pid,status:(reference?'reference':'reserved'),unit})
+            .eq('id',dup.id).select();
+          if(!rr.error){
+            inserted=rr.data;
+            error=null;
+          }
+        }
+      }
+      if(error){
+        return{ok:false,reason:'この時間枠は既に予約済みです。週間表を更新して、表示を確認してから再度お試しください。'};
+      }
+    }
+    if(error){
+      let reason=`予約処理に失敗しました（${error.message||error.code||'不明'}）`;
+      if(error.code==='23503') reason='患者IDの照合に失敗しました。患者管理で登録を確認してください。';
+      else if(error.code==='42501') reason='アクセス権限エラーです。管理者にお問い合わせください（RLS）。';
+      return{ok:false,reason};
+    }
   }
   console.log('予約成功',inserted);
 
@@ -1674,9 +1733,12 @@ function topCalHasOpen(ds){
     if(!times.length)return false;
     if(isDayOff(ds)&&!hasSpecialBusinessDay(ds,s.id))return false;
     return times.some(t=>{
-      if(!isSlotAvailable(ds,t,s.id))return false;
-      const b=topCalBookingAt(ds,s.id,t);
-      return !b;
+      if(!isBookableStart(ds,s.id,t,2))return false;
+      for(let i=0;i<2;i++){
+        const b=topCalBookingAt(ds,s.id,addMinutesToTime(t,i*20));
+        if(b)return false;
+      }
+      return true;
     });
   });
 }
@@ -1888,6 +1950,14 @@ function weekTableWeekendDays(ws){
 }
 async function loadWeekTableBookings(ws){
   const from=dateStr(ws), to=dateStr(addDays(ws,6));
+  // 週を切り替えるたびに、その週のキャッシュを一度完全に破棄してからDBの最新値で再構築する。
+  // これをしないと、別週で残った古い予約情報が「空き枠」に混ざり、表示とDB判定が不一致になる。
+  for(let d=new Date(ws);d<=addDays(ws,6);d=addDays(d,1)){
+    const ds=dateStr(d);
+    delete bookings[ds];
+    delete bookingStatuses[ds];
+    delete bookingUnits[ds];
+  }
   try{
     const {data,error}=await sb.from('bookings')
       .select('booking_date,time_slot,therapist,patient_id,status,unit')
@@ -2052,7 +2122,7 @@ async function renderWeekTable(){
             const topCell=hasTop&&topIsStart?unitLine(pid,status,time,false):(hasBottom&&bUnit===1&&bottomIsStart?addLine(time):'');
             const bottomCell=hasBottom&&bottomIsStart?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&topIsStart&&unit===1?addLine(bottomTime):'');
             const coveredOnly=(coverTop&&!topIsStart)||(coverBottom&&!bottomIsStart);
-            html+=`<td style="border:1px solid #D1D1D6;background:${coveredOnly?'#FFF7CC':'#fff'};padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}${coveredOnly?'<div style="font-size:8px;color:#7A5A00">予約中</div>':''}</td>`;
+            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}</td>`;
           }else{
             html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`;
           }
@@ -2502,18 +2572,30 @@ function pubResetTherapist(){
   document.getElementById('pub-th-select').style.display='block';
   document.getElementById('pub-slots-wrap').style.display='none';
 }
-function pubWeekNav(d){pubWeekOffset+=d;renderPublicSlots();}
+function pubWeekNav(d){
+  // 週移動したら、カレンダーから選択した特定日へのフォーカスを解除する。
+  // これにより「土曜を選択→次週」などでも表示が特定日に固定されない。
+  pubTargetDate=null;
+  pubWeekOffset+=d;
+  renderPublicSlots();
+}
 
 function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
-  const we=addDays(ws,4);
+  const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
+  const selectedDow=selectedDate?selectedDate.getDay():-1;
+  // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
+  // その選択日だけを表示する（「空きあり」なのに予約画面で空きが消える不整合を防ぐ）。
+  const selectedWeekend=selectedDate && (selectedDow===0||selectedDow===6);
+  const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4].map(i=>addDays(ws,i));
+  const labelStart=selectedWeekend?selectedDate:ws;
+  const labelEnd=selectedWeekend?selectedDate:addDays(ws,4);
   document.getElementById('pub-week-label').textContent=
-    `${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
+    `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
   let html='';let anyOpen=false;
-  for(let i=0;i<5;i++){
-    const d=addDays(ws,i);
+  for(const d of displayDates){
     const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
@@ -2529,7 +2611,7 @@ function renderPublicSlots(){
     }
     ensureBookingShape(ds);
     const openTimes=times
-      .filter(t=>!bookings[ds][pubTherapist][t] && isSlotAvailable(ds,t,pubTherapist))
+      .filter(t=>isBookableStart(ds,pubTherapist,t,2) && !weekTableBookingAt(ds,pubTherapist,t) && !weekTableBookingAt(ds,pubTherapist,addMinutesToTime(t,20)))
       .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
