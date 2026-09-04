@@ -1016,9 +1016,16 @@ function slotDefsForDay(dow,therapist){
 // ---- 臨時営業日 ----
 let specialDays=[]; // [{id,special_date,therapist,time_slot}]
 function getSpecialTimesForDay(ds,therapist){
+  // 臨時営業日は「開始-終了」で保存される場合があるため、予約枠としては開始時刻だけを返す。
+  // 例：15:00-16:00 → 15:00（この枠は60分＝3単位として扱える）。
   return specialDays
     .filter(s=>s.special_date===ds&&s.therapist===therapist)
-    .map(s=>normalizeTime(s.time_slot))
+    .map(s=>{
+      const raw=String(s.time_slot||'').trim();
+      const start=raw.split('-')[0].trim();
+      return normalizeTime(start);
+    })
+    .filter(Boolean)
     .filter((v,i,a)=>a.indexOf(v)===i);
 }
 function isSpecialBusinessSlot(ds,therapist,time){
@@ -1732,14 +1739,8 @@ function topCalHasOpen(ds){
     const times=timesForDate(ds,s.id);
     if(!times.length)return false;
     if(isDayOff(ds)&&!hasSpecialBusinessDay(ds,s.id))return false;
-    return times.some(t=>{
-      if(!isBookableStart(ds,s.id,t,2))return false;
-      for(let i=0;i<2;i++){
-        const b=topCalBookingAt(ds,s.id,addMinutesToTime(t,i*20));
-        if(b)return false;
-      }
-      return true;
-    });
+    // トップカレンダーも、週間表・空き状況と同じ共通判定を使用する。
+    return times.some(t=>isOpenStartFromCurrentCache(ds,s.id,t));
   });
 }
 async function renderTopAvailabilityCalendar(){
@@ -1748,7 +1749,11 @@ async function renderTopAvailabilityCalendar(){
   if(!grid||!label)return;
   label.textContent=`${topCalYear}年${topCalMonth+1}月`;
   grid.innerHTML='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:10px">空き状況を確認中…</div>';
-  await loadTopCalendarBookings();
+  // トップカレンダーも同じ予約キャッシュを最新DB値で更新してから判定する。
+  const from=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-01`;
+  const last=new Date(topCalYear,topCalMonth+1,0).getDate();
+  const to=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
+  await refreshBookingsForDateRange(from,to);
   const first=new Date(topCalYear,topCalMonth,1).getDay();
   const dim=new Date(topCalYear,topCalMonth+1,0).getDate();
   const prevDim=new Date(topCalYear,topCalMonth,0).getDate();
@@ -2620,6 +2625,7 @@ async function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
+  const we=addDays(ws,4);
   const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
   const selectedDow=selectedDate?selectedDate.getDay():-1;
   // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
@@ -2878,10 +2884,12 @@ function resSelectTherapist(t){
   const nav=document.getElementById('res-week-nav');if(nav)nav.style.display='flex';
   renderResSlots();
 }
-function renderResSlots(){
+async function renderResSlots(){
   const wrap=document.getElementById('res-slots-wrap');if(!wrap)return;
   const ws=monday(addDays(TODAY,resWeekOffset*7));
   const we=addDays(ws,4);
+  // 患者側の予約画面も、トップ・公開画面・週間表と同じ最新予約情報を使用する。
+  await refreshBookingsForDateRange(dateStr(ws),dateStr(we));
   const wl=document.getElementById('res-week-label');
   if(wl)wl.textContent=`${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
   let html='';let anyOpen=false;
@@ -2895,7 +2903,7 @@ function renderResSlots(){
     if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,resTherapist)){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
     ensureBookingShape(ds);
     const openTimes=times
-      .filter(t=>!bookings[ds]?.[resTherapist]?.[normalizeTime(t)] && isSlotAvailable(ds,t,resTherapist))
+      .filter(t=>isOpenStartFromCurrentCache(ds,resTherapist,t))
       .sort((a,b)=>{const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);return(ah*60+am)-(bh*60+bm);});
     if(!openTimes.length)continue;
     anyOpen=true;
