@@ -1054,10 +1054,13 @@ function isBookableStart(ds,therapist,time,unit=2){
     }
     return true;
   }
-  const availableTimes=new Set(timesForDate(ds,therapist).map(normalizeTime));
+  // 通常の40分枠は「開始時刻」がslot_definitionsに登録されており、
+  // 2単位目の+20分は独立した開始枠として登録されていない。
+  // そのため「+20分がtimesForDateに存在するか」は判定条件にしない。
+  // 2単位分の実時間について、営業・休診・PT休暇だけを確認する。
   for(let i=1;i<n;i++){
     const t=addMinutesToTime(nt,i*20);
-    if(!availableTimes.has(t)||!isSlotAvailable(ds,t,therapist))return false;
+    if(!isSlotAvailable(ds,t,therapist))return false;
   }
   return true;
 }
@@ -2089,7 +2092,7 @@ async function renderWeekTable(){
             const topCell=hasTop&&topIsStart?unitLine(pid,status,time,false):(hasBottom&&bUnit===1&&bottomIsStart?addLine(time):'');
             const bottomCell=hasBottom&&bottomIsStart?unitLine(bPid,bStatus,bottomTime,true):(hasTop&&topIsStart&&unit===1?addLine(bottomTime):'');
             const coveredOnly=(coverTop&&!topIsStart)||(coverBottom&&!bottomIsStart);
-            html+=`<td style="border:1px solid #D1D1D6;background:${coveredOnly?'#FFF7CC':'#fff'};padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}${coveredOnly?'<div style="font-size:8px;color:#7A5A00">予約中</div>':''}</td>`;
+            html+=`<td style="border:1px solid #D1D1D6;background:#fff;padding:3px;text-align:center;min-width:${CELL_W}">${topCell}${bottomCell}</td>`;
           }else{
             html+=`<td style="border:1px solid #D1D1D6;background:#DBEAFE;padding:3px;text-align:center;min-width:${CELL_W};cursor:pointer" onclick="weekTableBookModal('${ds}','${th}','${time}')"><div style="font-size:10px;color:#1D4ED8">○</div></td>`;
           }
