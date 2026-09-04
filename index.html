@@ -4509,6 +4509,7 @@ async function renderActuals(){
       ${arow('リハビリテーション計画書料２イ',months.map((m,i)=>amoney(carePlan2i[i]*2400)).concat(amoney(total(carePlan2i)*2400/12)))}
       ${arow('リハビリテーション計画書料２ロ',months.map((m,i)=>amoney(carePlan2ro[i]*1960)).concat(amoney(total(carePlan2ro)*1960/12)))}
       ${arow('実施計画書 合計',months.map((m,i)=>amoney(nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960)).concat(amoney(months.reduce((s,m,i)=>s + nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960,0)/12)))}
+      ${arow('リハビリテーション料 月合計',months.map((m,i)=>amoney(actual[i]*actualsPriceSettings.rehab2 + nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960)).concat(amoney((total(actual)*actualsPriceSettings.rehab2 + months.reduce((s,m,i)=>s + nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960,0))/12)),'total')}
     </tbody></table></div>`;
     html+=`<div class="card" style="margin:0 16px 14px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">💴 参考額の単価設定</div>
       <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「運動器Ⅱ」の参考額に反映します。</div>
