@@ -2696,7 +2696,7 @@ async function renderPublicSlots(){
     if(!times.length)continue;
     if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,pubTherapist)){
       html+=`<div class="card" style="padding:12px;margin-bottom:8px">
-        <div style="font-size:14px;font-weight:600;margin-bottom:6px">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:8px">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</div>
         <div style="font-size:12px;color:#B00020">🔴 休診日</div>
       </div>`;
       continue;
@@ -2708,7 +2708,7 @@ async function renderPublicSlots(){
     if(!openTimes.length)continue;
     anyOpen=true;
     html+=`<div class="card" style="padding:12px;margin-bottom:8px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">${DAY_NAMES[dow]}曜日 <span style="font-size:12px;color:#8E8E93;font-weight:400">${d.getMonth()+1}/${d.getDate()}</span></div>
+      <div style="font-size:17px;font-weight:700;margin-bottom:10px">${DAY_NAMES[dow]}曜日 <span style="font-size:16px;color:#8E8E93;font-weight:600">${d.getMonth()+1}/${d.getDate()}</span></div>
       <div style="display:flex;flex-direction:column;gap:6px">`;
     openTimes.forEach(t=>{
       html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="pubBookModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${t}','${ds}')"><span style="font-size:15px;font-weight:600">${t}</span><span style="font-size:12px;color:#1A7F47">空き ○ タップで予約</span></div>`;
