@@ -2130,7 +2130,7 @@ async function renderWeekTable(){
             const name=patients[uPid].name;
             const tentative=isTentativePatient(uPid);
             const bg=uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
-            const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?'実施済':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
+            const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?(Number(bUnit||2)===3?'実施済（3単位）':'実施済'):uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
             const nameStyle=uStatus==='reference'?'color:#7A5A00;':uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer'&&uStatus!=='reference')?`color:${TENTATIVE_FG};`:'';
             const clickTime=(small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime));
             return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${clickTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
@@ -3669,7 +3669,7 @@ function openAddPatient(){
     <div class="input-group"><label>担当セラピスト</label><select id="np-th">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="np-rehab-start"></div>
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="np-rehab-billing-start" onchange="autoCalcNewPatientDeadline()"></div>
-    <div class="input-group"><label>介護保険</label><label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" id="np-care-insurance" style="width:18px;height:18px"> 有</label></div>
+    <div class="input-group"><label>介護保険</label><select id="np-care-insurance"><option value="無" selected>無</option><option value="有">有</option></select></div>
     <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="np-dl" readonly></div>
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
@@ -3707,7 +3707,7 @@ async function saveNewPatient(){
   const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
-  const careInsurance=document.getElementById('np-care-insurance').checked;
+  const careInsurance=document.getElementById('np-care-insurance').value==='有';
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
     therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
@@ -3738,7 +3738,7 @@ function openEditPatient(id){
     <div class="input-group"><label>担当</label><select id="ep-th">${staffList.map(s=>`<option value="${s.id}" ${p.therapist===s.id?'selected':''}>${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="ep-rehab-start" value="${p.rehabStartDate||''}"></div>
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="ep-rehab-billing-start" value="${p.rehabBillingStartDate||''}" onchange="autoCalcEditPatientDeadline()"></div>
-    <div class="input-group"><label>介護保険</label><label style="display:flex;align-items:center;gap:8px;font-weight:400"><input type="checkbox" id="ep-care-insurance" ${p.careInsurance?'checked':''} style="width:18px;height:18px"> 有</label></div>
+    <div class="input-group"><label>介護保険</label><select id="ep-care-insurance"><option value="無" ${p.careInsurance?'':'selected'}>無</option><option value="有" ${p.careInsurance?'selected':''}>有</option></select></div>
     <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="ep-dl" value="${dl}" readonly></div>
     <div class="input-group"><label>備考</label><input type="text" id="ep-note" value="${p.note||''}"></div>
     <div style="display:flex;gap:8px">
@@ -3759,7 +3759,7 @@ async function saveEditPatient(id){
     disease:document.getElementById('ep-disease').value,therapist:document.getElementById('ep-th').value,
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
-    careInsurance:document.getElementById('ep-care-insurance').checked,
+    careInsurance:document.getElementById('ep-care-insurance').value==='有',
     deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
     note:document.getElementById('ep-note').value};
   const btn=document.getElementById('ep-submit');btn.disabled=true;btn.textContent='保存中...';
@@ -4539,9 +4539,19 @@ async function renderActuals(){
 
     // 新規患者数（開始）は「患者管理」のリハビリ開始日を月別に集計。
     const newP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym)).length);
-    // 介護保険：チェック有かつリハビリ開始日が当月の患者数／当月開始ではない患者数
-    const carePlan2i=months.map(m=>Object.entries(careInsurancePatients).filter(([pid,checked])=>!!checked && String(rehabStartDates[String(pid)]||'').startsWith(m.ym)).length);
-    const carePlan2ro=months.map(m=>Object.entries(careInsurancePatients).filter(([pid,checked])=>{const ds=String(rehabStartDates[String(pid)]||'');return !!checked && ds!=='' && !ds.startsWith(m.ym);}).length);
+    // 介護保険：「有」の患者について、最初に「実施済」となった月をイ、その翌月以降をロとして計算。
+    // 介護保険の判定は患者管理の「有・無」を基準とし、初回月はリハビリ開始日ではなく実際の実施済履歴から判定する。
+    const firstDoneYmByPatient={};
+    rows.forEach((monthRows,mi)=>{
+      const ym=months[mi].ym;
+      monthRows.forEach(b=>{
+        if(b.status==='done' && careInsurancePatients[String(b.patient_id)] && !firstDoneYmByPatient[String(b.patient_id)]){
+          firstDoneYmByPatient[String(b.patient_id)]=ym;
+        }
+      });
+    });
+    const carePlan2i=months.map(m=>Object.entries(firstDoneYmByPatient).filter(([pid,ym])=>careInsurancePatients[String(pid)] && ym===m.ym).length);
+    const carePlan2ro=months.map(m=>Object.entries(firstDoneYmByPatient).filter(([pid,ym])=>careInsurancePatients[String(pid)] && ym<m.ym).length);
 
     // 介護保険「なし」の運動器患者数・新規患者数を計算。
     // 運動器患者数は、その月に実施済となった患者のユニーク人数から介護保険「有」を除外。
@@ -4573,6 +4583,7 @@ async function renderActuals(){
       ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
+      ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
       ${arow('新規患者数（開始）',newP.map(afmt).concat(afmt(tNew/12)))}
       <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
       ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
