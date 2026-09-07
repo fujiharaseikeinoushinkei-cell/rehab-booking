@@ -831,6 +831,24 @@ function dateStr(d){
   const day=String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
+// 生年月日から現在年齢を算出（誕生日がまだ来ていない場合は1歳引く）
+function calcAge(dob,baseDate=TODAY){
+  if(!dob)return null;
+  const d=new Date(`${dob}T00:00:00`);
+  if(Number.isNaN(d.getTime()))return null;
+  let age=baseDate.getFullYear()-d.getFullYear();
+  const birthdayPassed=(baseDate.getMonth()>d.getMonth()) ||
+    (baseDate.getMonth()===d.getMonth() && baseDate.getDate()>=d.getDate());
+  if(!birthdayPassed)age--;
+  return age>=0?age:null;
+}
+// 患者管理用の期限表示：～YYYY/M/D
+function formatPatientDeadline(deadline){
+  if(!deadline)return '～未設定';
+  const d=deadline instanceof Date?deadline:new Date(deadline);
+  if(Number.isNaN(d.getTime()))return '～未設定';
+  return `～${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+}
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
@@ -3580,7 +3598,7 @@ function renderPatientList(){
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:600;font-size:14px;flex:1;cursor:pointer" onclick="openEditPatient('${id}')">${p.name}</span>
       </div>
-      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'}</div>
+      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientDeadline(p.deadline)}</div>
       <div style="display:flex;gap:4px">
         <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
         <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
