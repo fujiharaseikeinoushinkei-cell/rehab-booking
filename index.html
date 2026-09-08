@@ -438,6 +438,22 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="pad pt-12" id="atab-status" style="display:none">
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">予約のステータスを変更できます</p>
     <div class="input-group"><label>対象日</label><input type="date" id="st-date" onchange="loadStatusSlots()"></div>
+
+    <div class="card" style="margin-top:4px;margin-bottom:14px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px">月予定単位数</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <label style="display:block;font-size:13px;color:#8E8E93;margin-bottom:5px">対象月</label>
+          <select id="st-month" onchange="calcMonthlyPlannedUnits()"></select>
+        </div>
+        <div style="flex:1;min-width:180px">
+          <label style="display:block;font-size:13px;color:#8E8E93;margin-bottom:5px">患者選択</label>
+          <select id="st-patient" onchange="calcMonthlyPlannedUnits()"><option value="">患者を選択してください</option></select>
+        </div>
+      </div>
+      <div id="st-monthly-planned-result" style="margin-top:10px;font-size:18px;font-weight:700">患者と月を選択してください</div>
+    </div>
+
     <div id="status-slots"></div>
   </div>
 
@@ -1033,6 +1049,7 @@ function slotDefsForDay(dow,therapist){
 
 // ---- 臨時営業日 ----
 let specialDays=[]; // [{id,special_date,therapist,time_slot}]
+let confirmedSpecialDayIds={}; // {id: confirmed_at(JST)}
 function getSpecialTimesForDay(ds,therapist){
   // 臨時営業日は「開始-終了」で保存される場合があるため、予約枠としては開始時刻だけを返す。
   // 例：15:00-16:00 → 15:00（この枠は60分＝3単位として扱える）。
@@ -1843,6 +1860,7 @@ function switchTab(prefix,name,el){
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
+  if(name==='status'){populateStatusMonthlySelectors();loadStatusSlots();}
   if(name==='patients')renderPatientList();
   if(name==='booking')renderBasicBookingTable();
   if(name==='holidays')renderHolidays();
@@ -3370,6 +3388,48 @@ function renderSchedule(){
   el.innerHTML=html;
 }
 
+// ---- 月予定単位数 ----
+function populateStatusMonthlySelectors(){
+  const monthEl=document.getElementById('st-month');
+  const patientEl=document.getElementById('st-patient');
+  if(!monthEl||!patientEl)return;
+  const currentMonth=TODAY.getMonth()+1;
+  monthEl.innerHTML=Array.from({length:12},(_,i)=>{
+    const m=i+1;
+    return `<option value="${m}" ${m===currentMonth?'selected':''}>${m}月</option>`;
+  }).join('');
+  const current=patientEl.value;
+  const list=Object.entries(patients)
+    .filter(([id,p])=>p && !p.archived && !p.tentative)
+    .sort((a,b)=>String(a[0]).localeCompare(String(b[0]),'ja',{numeric:true}));
+  patientEl.innerHTML='<option value="">患者を選択してください</option>'+list.map(([id,p])=>`<option value="${escapeHtml(String(id))}">${escapeHtml(String(id))}：${escapeHtml(p.name||'')}</option>`).join('');
+  if(current && patients[current] && !patients[current].archived && !patients[current].tentative)patientEl.value=current;
+}
+async function calcMonthlyPlannedUnits(){
+  const monthEl=document.getElementById('st-month');
+  const patientEl=document.getElementById('st-patient');
+  const resultEl=document.getElementById('st-monthly-planned-result');
+  if(!monthEl||!patientEl||!resultEl)return;
+  const pid=patientEl.value;
+  const month=Number(monthEl.value);
+  if(!pid||!month){resultEl.textContent='患者と月を選択してください';return;}
+  const year=TODAY.getFullYear();
+  const from=`${year}-${String(month).padStart(2,'0')}-01`;
+  const lastDay=new Date(year,month,0).getDate();
+  const to=`${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  resultEl.textContent='計算中…';
+  const {data,error}=await sb.from('bookings').select('status,unit').eq('patient_id',pid).gte('booking_date',from).lte('booking_date',to).in('status',['reserved','done']);
+  if(error){console.error('月予定単位数の取得に失敗',error);resultEl.textContent='取得に失敗しました';return;}
+  let reservedUnits=0,doneUnits=0;
+  (data||[]).forEach(b=>{
+    const u=Number(b.unit)||2;
+    if(b.status==='reserved')reservedUnits+=u;
+    if(b.status==='done')doneUnits+=u;
+  });
+  const total=reservedUnits+doneUnits;
+  resultEl.textContent=`${total}単位`;
+}
+
 // ---- STATUS MANAGEMENT ----
 function loadStatusSlots(){
   const ds=document.getElementById('st-date').value;
@@ -4191,22 +4251,58 @@ function renderSettingsDisplay(){
 
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
 // ---- 臨時営業日設定 ----
+function saveConfirmedSpecialDayIds(){
+  return dbSaveSetting('confirmed_special_business_days', JSON.stringify(confirmedSpecialDayIds));
+}
+function renderSpecialDayRow(s, confirmed=false){
+  const d=parseLocalDate(s.special_date);
+  const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  return `<div class="card" style="display:flex;align-items:center;gap:10px">
+    <div style="flex:1">
+      <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
+      <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
+    </div>
+    ${confirmed
+      ? '<span style="font-size:13px;font-weight:600">確定済</span>'
+      : `<button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button><button class="btn btn-sm btn-primary" onclick="confirmSpecialDay(${s.id})">確定</button>`}
+  </div>`;
+}
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
-  if(!specialDays.length){el.innerHTML='<div class="empty">臨時営業日の登録はありません</div>';return;}
-  const sorted=[...specialDays].sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
-  el.innerHTML=sorted.map(s=>{
-    const d=parseLocalDate(s.special_date);
-    const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
-    return `<div class="card" style="display:flex;align-items:center;gap:10px">
-      <div style="flex:1">
-        <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
-        <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
-      </div>
-      <button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button>
-    </div>`;
-  }).join('');
+  const confirmed=Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,'');
+  const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
+    .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
+  const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
+  const cutoff=dateStr(fiveYearsAgo);
+  const past=[...specialDays].filter(s=>Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)) && s.special_date>=cutoff)
+    .sort((a,b)=>b.special_date===a.special_date?timeMins(b.time_slot)-timeMins(a.time_slot):b.special_date.localeCompare(a.special_date));
+  const activeHtml=active.length?active.map(s=>renderSpecialDayRow(s,false)).join(''):'<div class="empty">臨時営業日の登録はありません</div>';
+  const pastHtml=`<div class="card" style="margin-top:16px;cursor:pointer" onclick="togglePastSpecialDays()">
+    <div style="display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:600"><span>過去の臨時営業日一覧</span><span id="past-special-days-arrow">▶</span></div>
+    <div id="past-special-days-content" style="display:none;margin-top:10px">${past.length?past.map(s=>renderSpecialDayRow(s,true)).join(''):'<div class="empty">過去5年分の確定済みデータはありません</div>'}</div>
+  </div>`;
+  el.innerHTML=activeHtml+pastHtml;
+}
+function togglePastSpecialDays(){
+  const c=document.getElementById('past-special-days-content');
+  const a=document.getElementById('past-special-days-arrow');
+  if(!c)return;
+  const open=c.style.display==='none';
+  c.style.display=open?'block':'none';
+  if(a)a.textContent=open?'▼':'▶';
+}
+async function confirmSpecialDay(id){
+  const s=specialDays.find(x=>x.id===id);
+  if(!s)return;
+  if(!confirm('この臨時営業日を確定しますか？\n確定すると「過去の臨時営業日一覧」に保存されます。'))return;
+  confirmedSpecialDayIds[String(id)]=fmtDateTimeJST(new Date());
+  try{await saveConfirmedSpecialDayIds();}
+  catch(e){delete confirmedSpecialDayIds[String(id)];showToast('確定の保存に失敗しました');return;}
+  renderSpecialDaysList();
+  updateLastUpdated();
+  await dbLog('admin','confirm_special_day',`${s.special_date} ${s.time_slot} ${getStaffName(s.therapist)}`);
+  showToast('臨時営業日を確定しました','#34C759');
 }
 async function addSpecialDay(){
   const ds=document.getElementById('sp-date').value;
@@ -4237,6 +4333,8 @@ async function deleteSpecialDay(id){
   const {error}=await sb.from('special_business_days').delete().eq('id',id);
   if(error){showToast('削除に失敗しました');return;}
   specialDays=specialDays.filter(s=>s.id!==id);
+  delete confirmedSpecialDayIds[String(id)];
+  await saveConfirmedSpecialDayIds();
   renderSpecialDaysList();updateLastUpdated();
   showToast('臨時営業日を削除しました');
   renderWeekTable();
