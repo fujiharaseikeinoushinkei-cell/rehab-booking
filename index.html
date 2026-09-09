@@ -438,22 +438,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="pad pt-12" id="atab-status" style="display:none">
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">予約のステータスを変更できます</p>
     <div class="input-group"><label>対象日</label><input type="date" id="st-date" onchange="loadStatusSlots()"></div>
-
-    <div class="card" style="margin-top:4px;margin-bottom:14px">
-      <div style="font-size:14px;font-weight:600;margin-bottom:10px">月予定単位数</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px">
-          <label style="display:block;font-size:13px;color:#8E8E93;margin-bottom:5px">対象月</label>
-          <select id="st-month" onchange="calcMonthlyPlannedUnits()"></select>
-        </div>
-        <div style="flex:1;min-width:180px">
-          <label style="display:block;font-size:13px;color:#8E8E93;margin-bottom:5px">患者選択</label>
-          <select id="st-patient" onchange="calcMonthlyPlannedUnits()"><option value="">患者を選択してください</option></select>
-        </div>
-      </div>
-      <div id="st-monthly-planned-result" style="margin-top:10px;font-size:18px;font-weight:700">患者と月を選択してください</div>
-    </div>
-
     <div id="status-slots"></div>
   </div>
 
@@ -1195,9 +1179,9 @@ let rehabBillingStartDates = {};
 async function saveRehabBillingStartDates(){
   await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
 }
-function calcRehabDeadline(dateStr){
-  if(!dateStr)return '';
-  const d=parseLocalDate(dateStr);
+function calcRehabDeadline(inputDateStr){
+  if(!inputDateStr)return '';
+  const d=parseLocalDate(inputDateStr);
   d.setDate(d.getDate()+150);
   return dateStr(d);
 }
@@ -1860,7 +1844,6 @@ function switchTab(prefix,name,el){
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
   if(name==='schedule')renderSchedule();
-  if(name==='status'){populateStatusMonthlySelectors();loadStatusSlots();}
   if(name==='patients')renderPatientList();
   if(name==='booking')renderBasicBookingTable();
   if(name==='holidays')renderHolidays();
@@ -3386,48 +3369,6 @@ function renderSchedule(){
   });
   html+='</div>';
   el.innerHTML=html;
-}
-
-// ---- 月予定単位数 ----
-function populateStatusMonthlySelectors(){
-  const monthEl=document.getElementById('st-month');
-  const patientEl=document.getElementById('st-patient');
-  if(!monthEl||!patientEl)return;
-  const currentMonth=TODAY.getMonth()+1;
-  monthEl.innerHTML=Array.from({length:12},(_,i)=>{
-    const m=i+1;
-    return `<option value="${m}" ${m===currentMonth?'selected':''}>${m}月</option>`;
-  }).join('');
-  const current=patientEl.value;
-  const list=Object.entries(patients)
-    .filter(([id,p])=>p && !p.archived && !p.tentative)
-    .sort((a,b)=>String(a[0]).localeCompare(String(b[0]),'ja',{numeric:true}));
-  patientEl.innerHTML='<option value="">患者を選択してください</option>'+list.map(([id,p])=>`<option value="${escapeHtml(String(id))}">${escapeHtml(String(id))}：${escapeHtml(p.name||'')}</option>`).join('');
-  if(current && patients[current] && !patients[current].archived && !patients[current].tentative)patientEl.value=current;
-}
-async function calcMonthlyPlannedUnits(){
-  const monthEl=document.getElementById('st-month');
-  const patientEl=document.getElementById('st-patient');
-  const resultEl=document.getElementById('st-monthly-planned-result');
-  if(!monthEl||!patientEl||!resultEl)return;
-  const pid=patientEl.value;
-  const month=Number(monthEl.value);
-  if(!pid||!month){resultEl.textContent='患者と月を選択してください';return;}
-  const year=TODAY.getFullYear();
-  const from=`${year}-${String(month).padStart(2,'0')}-01`;
-  const lastDay=new Date(year,month,0).getDate();
-  const to=`${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-  resultEl.textContent='計算中…';
-  const {data,error}=await sb.from('bookings').select('status,unit').eq('patient_id',pid).gte('booking_date',from).lte('booking_date',to).in('status',['reserved','done']);
-  if(error){console.error('月予定単位数の取得に失敗',error);resultEl.textContent='取得に失敗しました';return;}
-  let reservedUnits=0,doneUnits=0;
-  (data||[]).forEach(b=>{
-    const u=Number(b.unit)||2;
-    if(b.status==='reserved')reservedUnits+=u;
-    if(b.status==='done')doneUnits+=u;
-  });
-  const total=reservedUnits+doneUnits;
-  resultEl.textContent=`${total}単位`;
 }
 
 // ---- STATUS MANAGEMENT ----
