@@ -3223,7 +3223,7 @@ function notifShowMore(type){
 
 async function approvePatientChange(id){
   if(getCurrentActor()!=='admin'){showToast('管理者ログイン中のみ承認できます');return;}
-  const n=notifications.find(x=>Number(x.id)===Number(id));
+  const n=notifications.find(x=>String(x.id)===String(id));
   if(!n || !isPatientBookingChange(n)){showToast('承認対象の予約変更が見つかりません');return;}
   if(isApprovedNotification(n)){showToast('すでに承認済みです');return;}
   const reply=getStaffReplyText(n);
