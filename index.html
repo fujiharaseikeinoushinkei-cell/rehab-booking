@@ -438,7 +438,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="pad pt-12" id="atab-status" style="display:none">
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">予約のステータスを変更できます</p>
     <div class="input-group"><label>対象日</label><input type="date" id="st-date" onchange="loadStatusSlots()"></div>
-    <div id="status-month-summary" class="card" style="margin-bottom:12px"></div>
     <div id="status-slots"></div>
   </div>
 
@@ -1178,16 +1177,16 @@ let careInsurancePatients = {};
 // 患者ごとのリハビリ算定開始日（system_settingsで保持）
 let rehabBillingStartDates = {};
 async function saveRehabBillingStartDates(){
-  return await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
+  await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
 }
 function calcRehabDeadline(inputDateStr){
   if(!inputDateStr)return '';
   const d=parseLocalDate(inputDateStr);
-  d.setDate(d.getDate()+149);
+  d.setDate(d.getDate()+150);
   return dateStr(d);
 }
 async function saveRehabStartDates(){
-  return await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
+  await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
 }
 async function saveCareInsurancePatients(){
   await dbSaveSetting('patient_care_insurance', JSON.stringify(careInsurancePatients));
@@ -1247,12 +1246,6 @@ async function loadAllData(){
         archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
       }catch(e){ archivedPatientIds=new Set(); }
     }
-    if(r.key==='confirmed_special_business_days'){
-      try{
-        const parsed=JSON.parse(r.value||'{}');
-        confirmedSpecialDayIds=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){ confirmedSpecialDayIds={}; }
-    }
     if(r.key==='patient_rehab_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
@@ -1305,9 +1298,8 @@ async function loadAllData(){
   (pdRes.data||[]).forEach(p=>{
     patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
       disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
-      deadline:p.deadline?new Date(p.deadline):null,
+      deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
       rehabStartDate:rehabStartDates[String(p.id)]||'',
-      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
   });
@@ -1652,12 +1644,7 @@ async function dbLog(operator,action,detail){
 }
 
 async function dbSaveSetting(key,value){
-  const {error}=await sb.from('system_settings').upsert({key,value},{onConflict:'key'});
-  if(error){
-    console.error(`設定保存失敗: ${key}`,error);
-    return false;
-  }
-  return true;
+  await sb.from('system_settings').upsert({key,value},{onConflict:'key'});
 }
 
 async function dbAddPatient(id,p){
@@ -3172,7 +3159,7 @@ function renderNotifications(){
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
-  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n)&&!isApprovedNotification(n));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
   const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
@@ -3189,10 +3176,10 @@ function renderNotifications(){
       let action='';
       if(type==='patient' && change){
         action=approved
-          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">×</button></div>`
-          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${JSON.stringify(String(n.id))})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div></div>`;
+          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${n.id})">×</button></div>`
+          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${n.id})">✓</div></div>`;
       }else if(type==='admin'){
-        action=`<div class="notif-dismiss" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div>`;
+        action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
       }
       return `<div class="notif-item" id="ni-${n.id}">
         <div class="notif-dot"></div>
@@ -3233,9 +3220,6 @@ async function approvePatientChange(id){
   const {data,error}=await sb.from('notifications').update({message:updatedMessage}).eq('id',id).select().single();
   if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
   n.text=data?.message||updatedMessage;
-  // 承認済みの患者予約変更は管理者側の未処理一覧から外す。
-  // 通知レコード自体は残し、患者側の「担当者より」表示に利用する。
-  // 承認状態は既存の STAFF_REPLY_MARK で判定するためDBスキーマ変更は行わない。
   // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
   await dbLog('admin','approve_patient_change',`${n.operator}：${reply}`);
   renderNotifications();
@@ -3245,20 +3229,8 @@ async function approvePatientChange(id){
 }
 
 async function dismissNotif(id){
-  const targetId=String(id);
-  // DB更新を先に確定させる。更新対象が0件でもSupabaseはerrorを返さないため、
-  // selectで対象レコードが実際に更新されたことまで確認してから画面から削除する。
-  const {data,error}=await sb.from('notifications')
-    .update({dismissed:true})
-    .eq('id',targetId)
-    .select('id,dismissed')
-    .maybeSingle();
-  if(error || !data || data.dismissed!==true){
-    console.error('通知の削除失敗:',error||'更新対象の通知が確認できません');
-    showToast('通知の削除に失敗しました。画面を更新して再度お試しください。','#FF3B30');
-    return;
-  }
-  notifications=notifications.filter(n=>String(n.id)!==targetId);
+  await sb.from('notifications').update({dismissed:true}).eq('id',id);
+  notifications=notifications.filter(n=>n.id!==id);
   renderNotifications();
 }
 
@@ -3402,27 +3374,8 @@ function renderSchedule(){
 // ---- STATUS MANAGEMENT ----
 function loadStatusSlots(){
   const ds=document.getElementById('st-date').value;
-  const summaryEl=document.getElementById('status-month-summary');
-  if(!ds){document.getElementById('status-slots').innerHTML='';if(summaryEl)summaryEl.innerHTML='';return;}
+  if(!ds){document.getElementById('status-slots').innerHTML='';return;}
   ensureBookingShape(ds);
-  if(summaryEl){
-    const ym=ds.slice(0,7);
-    let reservedUnits=0,doneUnits=0;
-    Object.keys(bookings||{}).forEach(date=>{
-      if(!String(date).startsWith(ym))return;
-      staffList.forEach(st=>{
-        const statuses=bookingStatuses[date]?.[st.id]||{};
-        const units=bookingUnits[date]?.[st.id]||{};
-        Object.keys(statuses).forEach(t=>{
-          const unit=Number(units[t]||2);
-          if(statuses[t]==='reserved')reservedUnits+=unit;
-          if(statuses[t]==='done')doneUnits+=unit;
-        });
-      });
-    });
-    const totalUnits=reservedUnits+doneUnits;
-    summaryEl.innerHTML=`<div style="font-size:14px;font-weight:700;margin-bottom:6px">${Number(ds.slice(5,7))}月＋患者</div><div style="font-size:12px;color:#3C3C43;line-height:1.6">予約＋実施済の取得単位数：<strong style="font-size:18px">${totalUnits}</strong> 単位</div><div style="font-size:11px;color:#8E8E93;margin-top:3px">予約中 ${reservedUnits}単位 ／ 実施済 ${doneUnits}単位</div>`;
-  }
   const d=new Date(ds);
   let html='';
   staffList.forEach(s=>{
@@ -3673,8 +3626,7 @@ function renderPatientList(){
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:600;font-size:14px;flex:1;cursor:pointer" onclick="openEditPatient('${id}')">${p.name}</span>
       </div>
-      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'}</div>
-      <div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.6">リハビリ開始日：${p.rehabStartDate||'未設定'}<br>リハビリ算定開始日：${p.rehabBillingStartDate||'未設定'}<br>リハビリ期限：${formatPatientDeadline(p.deadline)}</div>
+      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientDeadline(p.deadline)}</div>
       <div style="display:flex;gap:4px">
         <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
         <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
@@ -3753,13 +3705,13 @@ async function saveNewPatient(){
   if(!id){errEl.textContent='患者IDを入力してください';errEl.style.display='block';return;}
   if(!name){errEl.textContent='患者名を入力してください';errEl.style.display='block';return;}
   if(patients[id]){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
+  const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
-  const deadlineStr=calcRehabDeadline(rehabBillingStartDate);
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:deadlineStr?new Date(deadlineStr):null,history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   const ok=await dbAddPatient(id,newP);
@@ -3768,16 +3720,12 @@ async function saveNewPatient(){
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
-  const savedStart=await saveRehabStartDates();
-  const savedBilling=await saveRehabBillingStartDates();
-  const savedCare=await saveCareInsurancePatients();
+  await saveRehabStartDates();
+  await saveRehabBillingStartDates();
+  await saveCareInsurancePatients();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
-  if(!savedStart||!savedBilling||savedCare===false){
-    showToast(`${name} さんは登録しましたが、一部の患者情報の保存に失敗しました。設定を確認してください`,'#FF9500');
-  }else{
-    showToast(`${name} さんを登録しました`,'#34C759');
-  }
+  showToast(`${name} さんを登録しました`,'#34C759');
 }
 function openEditPatient(id){
   const p=patients[id];const dl=dateStr(p.deadline);
@@ -3813,9 +3761,8 @@ async function saveEditPatient(id){
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').value==='有',
-    deadline:null,
+    deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
     note:document.getElementById('ep-note').value};
-  updated.deadline=updated.rehabBillingStartDate?new Date(calcRehabDeadline(updated.rehabBillingStartDate)):null;
   const btn=document.getElementById('ep-submit');btn.disabled=true;btn.textContent='保存中...';
   const ok=await dbUpdatePatient(id,updated);
   btn.disabled=false;btn.textContent='保存';
@@ -3824,16 +3771,12 @@ async function saveEditPatient(id){
   rehabStartDates[String(id)]=updated.rehabStartDate||'';
   rehabBillingStartDates[String(id)]=updated.rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=!!updated.careInsurance;
-  const savedStart=await saveRehabStartDates();
-  const savedBilling=await saveRehabBillingStartDates();
-  const savedCare=await saveCareInsurancePatients();
+  await saveRehabStartDates();
+  await saveRehabBillingStartDates();
+  await saveCareInsurancePatients();
   await dbLog('admin','edit_patient',`${updated.name}（${id}）を編集`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
-  if(!savedStart||!savedBilling||savedCare===false){
-    showToast('患者情報は更新しましたが、一部の患者情報の保存に失敗しました。設定を確認してください','#FF9500');
-  }else{
-    showToast('保存しました','#34C759');
-  }
+  showToast('保存しました','#34C759');
 }
 async function deletePatient(id){
   const p=patients[id];
@@ -4268,6 +4211,7 @@ function renderSpecialDayRow(s, confirmed=false){
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
+  const confirmed=Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,'');
   const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
     .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
   const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
