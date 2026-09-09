@@ -1177,7 +1177,7 @@ let careInsurancePatients = {};
 // 患者ごとのリハビリ算定開始日（system_settingsで保持）
 let rehabBillingStartDates = {};
 async function saveRehabBillingStartDates(){
-  await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
+  return await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
 }
 function calcRehabDeadline(inputDateStr){
   if(!inputDateStr)return '';
@@ -1186,7 +1186,7 @@ function calcRehabDeadline(inputDateStr){
   return dateStr(d);
 }
 async function saveRehabStartDates(){
-  await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
+  return await dbSaveSetting('patient_rehab_start_dates', JSON.stringify(rehabStartDates));
 }
 async function saveCareInsurancePatients(){
   await dbSaveSetting('patient_care_insurance', JSON.stringify(careInsurancePatients));
@@ -1651,7 +1651,12 @@ async function dbLog(operator,action,detail){
 }
 
 async function dbSaveSetting(key,value){
-  await sb.from('system_settings').upsert({key,value},{onConflict:'key'});
+  const {error}=await sb.from('system_settings').upsert({key,value},{onConflict:'key'});
+  if(error){
+    console.error(`設定保存失敗: ${key}`,error);
+    return false;
+  }
+  return true;
 }
 
 async function dbAddPatient(id,p){
@@ -3642,7 +3647,8 @@ function renderPatientList(){
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:600;font-size:14px;flex:1;cursor:pointer" onclick="openEditPatient('${id}')">${p.name}</span>
       </div>
-      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientDeadline(p.deadline)}</div>
+      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'}</div>
+      <div style="font-size:11px;color:#555;margin-bottom:6px;line-height:1.6">リハビリ開始日：${p.rehabStartDate||'未設定'}<br>リハビリ算定開始日：${p.rehabBillingStartDate||'未設定'}<br>リハビリ期限：${formatPatientDeadline(p.deadline)}</div>
       <div style="display:flex;gap:4px">
         <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
         <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
@@ -3721,13 +3727,13 @@ async function saveNewPatient(){
   if(!id){errEl.textContent='患者IDを入力してください';errEl.style.display='block';return;}
   if(!name){errEl.textContent='患者名を入力してください';errEl.style.display='block';return;}
   if(patients[id]){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
-  const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
+  const deadlineStr=calcRehabDeadline(rehabBillingStartDate);
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):null,history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:deadlineStr?new Date(deadlineStr):null,history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   const ok=await dbAddPatient(id,newP);
@@ -3736,12 +3742,16 @@ async function saveNewPatient(){
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
-  await saveRehabStartDates();
-  await saveRehabBillingStartDates();
-  await saveCareInsurancePatients();
+  const savedStart=await saveRehabStartDates();
+  const savedBilling=await saveRehabBillingStartDates();
+  const savedCare=await saveCareInsurancePatients();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
-  showToast(`${name} さんを登録しました`,'#34C759');
+  if(!savedStart||!savedBilling||savedCare===false){
+    showToast(`${name} さんは登録しましたが、一部の患者情報の保存に失敗しました。設定を確認してください`,'#FF9500');
+  }else{
+    showToast(`${name} さんを登録しました`,'#34C759');
+  }
 }
 function openEditPatient(id){
   const p=patients[id];const dl=dateStr(p.deadline);
@@ -3777,8 +3787,9 @@ async function saveEditPatient(id){
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').value==='有',
-    deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
+    deadline:null,
     note:document.getElementById('ep-note').value};
+  updated.deadline=updated.rehabBillingStartDate?new Date(calcRehabDeadline(updated.rehabBillingStartDate)):null;
   const btn=document.getElementById('ep-submit');btn.disabled=true;btn.textContent='保存中...';
   const ok=await dbUpdatePatient(id,updated);
   btn.disabled=false;btn.textContent='保存';
@@ -3787,12 +3798,16 @@ async function saveEditPatient(id){
   rehabStartDates[String(id)]=updated.rehabStartDate||'';
   rehabBillingStartDates[String(id)]=updated.rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=!!updated.careInsurance;
-  await saveRehabStartDates();
-  await saveRehabBillingStartDates();
-  await saveCareInsurancePatients();
+  const savedStart=await saveRehabStartDates();
+  const savedBilling=await saveRehabBillingStartDates();
+  const savedCare=await saveCareInsurancePatients();
   await dbLog('admin','edit_patient',`${updated.name}（${id}）を編集`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
-  showToast('保存しました','#34C759');
+  if(!savedStart||!savedBilling||savedCare===false){
+    showToast('患者情報は更新しましたが、一部の患者情報の保存に失敗しました。設定を確認してください','#FF9500');
+  }else{
+    showToast('保存しました','#34C759');
+  }
 }
 async function deletePatient(id){
   const p=patients[id];
