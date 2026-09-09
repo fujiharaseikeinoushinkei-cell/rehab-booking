@@ -3191,7 +3191,7 @@ function renderNotifications(){
           ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">×</button></div>`
           : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${JSON.stringify(String(n.id))})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div></div>`;
       }else if(type==='admin'){
-        action=`<div class="notif-dismiss" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div>`;
+        action=`<button type="button" class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</button>`;
       }
       return `<div class="notif-item" id="ni-${n.id}">
         <div class="notif-dot"></div>
