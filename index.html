@@ -438,6 +438,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div class="pad pt-12" id="atab-status" style="display:none">
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">予約のステータスを変更できます</p>
     <div class="input-group"><label>対象日</label><input type="date" id="st-date" onchange="loadStatusSlots()"></div>
+    <div id="status-month-summary" class="card" style="margin-bottom:12px"></div>
     <div id="status-slots"></div>
   </div>
 
@@ -3245,18 +3246,20 @@ async function approvePatientChange(id){
 
 async function dismissNotif(id){
   const targetId=String(id);
-  // 先に画面から消し、DB更新に失敗した場合だけ元に戻す
-  const previousNotifications=notifications.slice();
-  notifications=notifications.filter(n=>String(n.id)!==targetId);
-  renderNotifications();
-  const {error}=await sb.from('notifications').update({dismissed:true}).eq('id',id);
-  if(error){
-    notifications=previousNotifications;
-    renderNotifications();
-    console.error('通知の削除失敗:',error);
+  // DB更新を先に確定させる。更新対象が0件でもSupabaseはerrorを返さないため、
+  // selectで対象レコードが実際に更新されたことまで確認してから画面から削除する。
+  const {data,error}=await sb.from('notifications')
+    .update({dismissed:true})
+    .eq('id',targetId)
+    .select('id,dismissed')
+    .maybeSingle();
+  if(error || !data || data.dismissed!==true){
+    console.error('通知の削除失敗:',error||'更新対象の通知が確認できません');
     showToast('通知の削除に失敗しました。画面を更新して再度お試しください。','#FF3B30');
     return;
   }
+  notifications=notifications.filter(n=>String(n.id)!==targetId);
+  renderNotifications();
 }
 
 // ---- CALENDAR ----
@@ -3399,8 +3402,27 @@ function renderSchedule(){
 // ---- STATUS MANAGEMENT ----
 function loadStatusSlots(){
   const ds=document.getElementById('st-date').value;
-  if(!ds){document.getElementById('status-slots').innerHTML='';return;}
+  const summaryEl=document.getElementById('status-month-summary');
+  if(!ds){document.getElementById('status-slots').innerHTML='';if(summaryEl)summaryEl.innerHTML='';return;}
   ensureBookingShape(ds);
+  if(summaryEl){
+    const ym=ds.slice(0,7);
+    let reservedUnits=0,doneUnits=0;
+    Object.keys(bookings||{}).forEach(date=>{
+      if(!String(date).startsWith(ym))return;
+      staffList.forEach(st=>{
+        const statuses=bookingStatuses[date]?.[st.id]||{};
+        const units=bookingUnits[date]?.[st.id]||{};
+        Object.keys(statuses).forEach(t=>{
+          const unit=Number(units[t]||2);
+          if(statuses[t]==='reserved')reservedUnits+=unit;
+          if(statuses[t]==='done')doneUnits+=unit;
+        });
+      });
+    });
+    const totalUnits=reservedUnits+doneUnits;
+    summaryEl.innerHTML=`<div style="font-size:14px;font-weight:700;margin-bottom:6px">${Number(ds.slice(5,7))}月＋患者</div><div style="font-size:12px;color:#3C3C43;line-height:1.6">予約＋実施済の取得単位数：<strong style="font-size:18px">${totalUnits}</strong> 単位</div><div style="font-size:11px;color:#8E8E93;margin-top:3px">予約中 ${reservedUnits}単位 ／ 実施済 ${doneUnits}単位</div>`;
+  }
   const d=new Date(ds);
   let html='';
   staffList.forEach(s=>{
