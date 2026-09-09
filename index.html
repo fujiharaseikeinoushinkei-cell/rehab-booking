@@ -1246,6 +1246,12 @@ async function loadAllData(){
         archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
       }catch(e){ archivedPatientIds=new Set(); }
     }
+    if(r.key==='confirmed_special_business_days'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        confirmedSpecialDayIds=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ confirmedSpecialDayIds={}; }
+    }
     if(r.key==='patient_rehab_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
@@ -3177,10 +3183,10 @@ function renderNotifications(){
       let action='';
       if(type==='patient' && change){
         action=approved
-          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${n.id})">×</button></div>`
-          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${n.id})">✓</div></div>`;
+          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">×</button></div>`
+          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${JSON.stringify(String(n.id))})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div></div>`;
       }else if(type==='admin'){
-        action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
+        action=`<div class="notif-dismiss" onclick="dismissNotif(${JSON.stringify(String(n.id))})">✓</div>`;
       }
       return `<div class="notif-item" id="ni-${n.id}">
         <div class="notif-dot"></div>
@@ -4221,7 +4227,6 @@ function renderSpecialDayRow(s, confirmed=false){
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
-  const confirmed=Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,'');
   const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
     .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
   const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
