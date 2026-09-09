@@ -1182,7 +1182,7 @@ async function saveRehabBillingStartDates(){
 function calcRehabDeadline(inputDateStr){
   if(!inputDateStr)return '';
   const d=parseLocalDate(inputDateStr);
-  d.setDate(d.getDate()+150);
+  d.setDate(d.getDate()+149);
   return dateStr(d);
 }
 async function saveRehabStartDates(){
@@ -1298,8 +1298,9 @@ async function loadAllData(){
   (pdRes.data||[]).forEach(p=>{
     patients[p.id]={name:p.name,kana:p.kana||'',dob:p.dob||'',gender:p.gender||'男',
       disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
-      deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
+      deadline:p.deadline?new Date(p.deadline):null,
       rehabStartDate:rehabStartDates[String(p.id)]||'',
+      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
   });
@@ -3159,7 +3160,7 @@ function renderNotifications(){
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
-  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n)&&!isApprovedNotification(n));
   const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
@@ -3220,6 +3221,9 @@ async function approvePatientChange(id){
   const {data,error}=await sb.from('notifications').update({message:updatedMessage}).eq('id',id).select().single();
   if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
   n.text=data?.message||updatedMessage;
+  // 承認済みの患者予約変更は管理者側の未処理一覧から外す。
+  // 通知レコード自体は残し、患者側の「担当者より」表示に利用する。
+  // 承認状態は既存の STAFF_REPLY_MARK で判定するためDBスキーマ変更は行わない。
   // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
   await dbLog('admin','approve_patient_change',`${n.operator}：${reply}`);
   renderNotifications();
@@ -3229,8 +3233,14 @@ async function approvePatientChange(id){
 }
 
 async function dismissNotif(id){
-  await sb.from('notifications').update({dismissed:true}).eq('id',id);
-  notifications=notifications.filter(n=>n.id!==id);
+  const targetId=String(id);
+  const {error}=await sb.from('notifications').update({dismissed:true}).eq('id',id);
+  if(error){
+    console.error('通知の削除失敗:',error);
+    showToast('通知の削除に失敗しました。画面を更新して再度お試しください。','#FF3B30');
+    return;
+  }
+  notifications=notifications.filter(n=>String(n.id)!==targetId);
   renderNotifications();
 }
 
@@ -3711,7 +3721,7 @@ async function saveNewPatient(){
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):null,history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   const ok=await dbAddPatient(id,newP);
