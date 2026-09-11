@@ -1239,6 +1239,12 @@ async function loadAllData(){
     }
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
+    if(r.key==='confirmed_special_business_days'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        confirmedSpecialDayIds=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ confirmedSpecialDayIds={}; }
+    }
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
     if(r.key==='archived_patient_ids'){
       try{
@@ -3600,10 +3606,10 @@ function renderDeadline(){
   }
 
   let html='';
-  html+=section(`${TODAY.getMonth()+1}月（当月）期限切れ`,thisMonth);
-  html+=section(`${TODAY.getMonth()+2}月（翌月）期限切れ`,nextMonth);
-  html+=section('期限切れ',expired);
-  html+=section('それ以降の期限',later);
+  html+=section(`${TODAY.getMonth()+1}月`,thisMonth);
+  html+=section(`${TODAY.getMonth()+2}月`,nextMonth);
+  html+=section('期限内の患者',later);
+  html+=section('期限切れの患者',expired);
   if(!html)html='<tr><td colspan="5" style="text-align:center;color:#8E8E93;padding:20px">該当する患者はいません</td></tr>';
   tb.innerHTML=html;
 }
@@ -4211,7 +4217,6 @@ function renderSpecialDayRow(s, confirmed=false){
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
-  const confirmed=Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,'');
   const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
     .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
   const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
