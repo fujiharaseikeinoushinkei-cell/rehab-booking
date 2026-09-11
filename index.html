@@ -704,14 +704,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         <button class="btn btn-sm btn-orange" onclick="printActuals()">🖨 印刷</button>
       </div>
     </div>
-    <div id="actuals-personal-acquired-units" class="card" style="margin-top:16px">
-      <div style="font-weight:600;margin-bottom:10px">個人取得単位</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <select id="actuals-personal-patient" onchange="renderPersonalAcquiredUnits()" style="min-width:180px"></select>
-        <input id="actuals-personal-month" type="month" onchange="renderPersonalAcquiredUnits()">
-        <span id="actuals-personal-units">0</span>
-      </div>
-    </div>
     <div class="actuals-kpi" id="actuals-kpi"></div>
     <div id="actuals-body"><div class="actuals-loading">年度を選択してください</div></div>
     <div class="actuals-note">
@@ -1247,12 +1239,6 @@ async function loadAllData(){
     }
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
-    if(r.key==='confirmed_special_business_days'){
-      try{
-        const parsed=JSON.parse(r.value||'{}');
-        confirmedSpecialDayIds=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
-      }catch(e){ confirmedSpecialDayIds={}; }
-    }
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
     if(r.key==='archived_patient_ids'){
       try{
@@ -1679,6 +1665,15 @@ async function dbUpdatePatient(id,p){
   return !error;
 }
 
+async function dbRestorePatient(id,p){
+  const {error}=await sb.from('patients').update({
+    name:p.name,kana:p.kana,dob:p.dob||null,gender:p.gender,
+    disease:p.disease,therapist:p.therapist,
+    deadline:p.deadline?p.deadline instanceof Date?dateStr(p.deadline):p.deadline:null,note:p.note
+  }).eq('id',id);
+  return !error;
+}
+
 async function dbDeletePatient(id){
   // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
   // 5年より古い実施済予約は削除し、未実施の予約も削除する。
@@ -1866,7 +1861,7 @@ function switchTab(prefix,name,el){
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
   if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();}
-  if(name==='actuals'){renderActuals();initPersonalAcquiredUnits();}
+  if(name==='actuals'){renderActuals();}
 }
 
 function renderTodaySchedule(){
@@ -3614,10 +3609,10 @@ function renderDeadline(){
   }
 
   let html='';
-  html+=section(`${TODAY.getMonth()+1}月`,thisMonth);
-  html+=section(`${TODAY.getMonth()+2}月`,nextMonth);
-  html+=section('期限内の患者',later);
-  html+=section('期限切れの患者',expired);
+  html+=section(`${TODAY.getMonth()+1}月（当月）期限切れ`,thisMonth);
+  html+=section(`${TODAY.getMonth()+2}月（翌月）期限切れ`,nextMonth);
+  html+=section('期限切れ',expired);
+  html+=section('それ以降の期限',later);
   if(!html)html='<tr><td colspan="5" style="text-align:center;color:#8E8E93;padding:20px">該当する患者はいません</td></tr>';
   tb.innerHTML=html;
 }
@@ -3718,7 +3713,8 @@ async function saveNewPatient(){
   const errEl=document.getElementById('np-err');
   if(!id){errEl.textContent='患者IDを入力してください';errEl.style.display='block';return;}
   if(!name){errEl.textContent='患者名を入力してください';errEl.style.display='block';return;}
-  if(patients[id]){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
+  const isReRegister=!!patients[id]&&isArchivedPatient(id);
+  if(patients[id]&&!isReRegister){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
   const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
@@ -3728,9 +3724,13 @@ async function saveNewPatient(){
     therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
-  const ok=await dbAddPatient(id,newP);
+  const ok=isReRegister?await dbRestorePatient(id,newP):await dbAddPatient(id,newP);
   if(!ok){errEl.textContent='登録に失敗しました';errEl.style.display='block';btn.disabled=false;btn.textContent='登録する';return;}
   patients[id]=newP;
+  if(isReRegister){
+    archivedPatientIds.delete(String(id));
+    await saveArchivedPatientIds();
+  }
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
@@ -4225,6 +4225,7 @@ function renderSpecialDayRow(s, confirmed=false){
 function renderSpecialDaysList(){
   const el=document.getElementById('special-day-list');
   if(!el)return;
+  const confirmed=Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,'');
   const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
     .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
   const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
@@ -4553,89 +4554,6 @@ function renderActualsFiscalYearSelect(){
   const el=document.getElementById('actuals-fy');if(!el)return;const cur=getCurrentFiscalYear();
   el.innerHTML=Array.from({length:5},(_,i)=>{const fy=cur-3+i;return `<option value="${fy}" ${fy===cur?'selected':''}>R${reiwaYear(fy)}年度（${fy}）</option>`;}).join('');
 }
-// ---- ⑨ 個人取得単位 ----
-// 選択した患者について、選択月の「予約＋実施済」の単位数を集計。
-// 既存の実績集計ロジックとは独立してDBから取得する。
-async function loadPersonalAcquiredUnits(pid, ym){
-  if(!pid || !ym)return 0;
-  const [y,m]=ym.split('-').map(Number);
-  if(!y || !m)return 0;
-  const from=`${ym}-01`;
-  const last=new Date(y,m,0).getDate();
-  const to=`${ym}-${String(last).padStart(2,'0')}`;
-
-  const size=1000;
-  let start=0;
-  let total=0;
-
-  while(true){
-    const {data,error}=await sb.from('bookings')
-      .select('booking_date,time_slot,therapist,patient_id,status,unit')
-      .eq('patient_id',pid)
-      .gte('booking_date',from)
-      .lte('booking_date',to)
-      .in('status',['reserved','done'])
-      .range(start,start+size-1);
-
-    if(error)throw error;
-
-    const rows=data||[];
-    rows.forEach(b=>{
-      total+=Number(b.unit)||2;
-    });
-
-    if(rows.length<size)break;
-    start+=size;
-  }
-  return total;
-}
-
-async function initPersonalAcquiredUnits(){
-  const sel=document.getElementById('actuals-personal-patient');
-  const ym=document.getElementById('actuals-personal-month');
-  if(!sel||!ym)return;
-
-  const currentYm=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
-  if(!ym.value)ym.value=currentYm;
-
-  const current=sel.value;
-  sel.innerHTML='<option value="">患者を選択</option>'+
-    Object.entries(patients||{})
-      .filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id))
-      .sort((a,b)=>(a[1].name||'').localeCompare(b[1].name||'','ja'))
-      .map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(id)} ${escapeHtml(p.name||'')}</option>`)
-      .join('');
-
-  if(current&&patients[current]&&!isTentativePatient(current)&&!isArchivedPatient(current)){
-    sel.value=current;
-  }
-  await renderPersonalAcquiredUnits();
-}
-
-async function renderPersonalAcquiredUnits(){
-  const pidEl=document.getElementById('actuals-personal-patient');
-  const ymEl=document.getElementById('actuals-personal-month');
-  const out=document.getElementById('actuals-personal-units');
-  if(!pidEl||!ymEl||!out)return;
-
-  const pid=pidEl.value;
-  const ym=ymEl.value;
-  if(!pid||!ym){
-    out.textContent='0';
-    return;
-  }
-
-  out.textContent='集計中...';
-  try{
-    const total=await loadPersonalAcquiredUnits(pid,ym);
-    out.textContent=String(total);
-  }catch(e){
-    console.error('個人取得単位の集計失敗',e);
-    out.textContent='0';
-    showToast('個人取得単位の集計に失敗しました');
-  }
-}
-
 async function renderActuals(){
   const body=document.getElementById('actuals-body');if(!body)return;
   const sel=document.getElementById('actuals-fy');if(!sel.options.length)renderActualsFiscalYearSelect();
