@@ -704,6 +704,14 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         <button class="btn btn-sm btn-orange" onclick="printActuals()">🖨 印刷</button>
       </div>
     </div>
+    <div id="actuals-personal-acquired-units" class="card" style="margin-top:16px">
+      <div style="font-weight:600;margin-bottom:10px">個人取得単位</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="actuals-personal-patient" onchange="renderPersonalAcquiredUnits()" style="min-width:180px"></select>
+        <input id="actuals-personal-month" type="month" onchange="renderPersonalAcquiredUnits()">
+        <span id="actuals-personal-units">0</span>
+      </div>
+    </div>
     <div class="actuals-kpi" id="actuals-kpi"></div>
     <div id="actuals-body"><div class="actuals-loading">年度を選択してください</div></div>
     <div class="actuals-note">
@@ -1858,7 +1866,7 @@ function switchTab(prefix,name,el){
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
   if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();}
-  if(name==='actuals'){renderActuals();}
+  if(name==='actuals'){renderActuals();initPersonalAcquiredUnits();}
 }
 
 function renderTodaySchedule(){
@@ -4545,6 +4553,89 @@ function renderActualsFiscalYearSelect(){
   const el=document.getElementById('actuals-fy');if(!el)return;const cur=getCurrentFiscalYear();
   el.innerHTML=Array.from({length:5},(_,i)=>{const fy=cur-3+i;return `<option value="${fy}" ${fy===cur?'selected':''}>R${reiwaYear(fy)}年度（${fy}）</option>`;}).join('');
 }
+// ---- ⑨ 個人取得単位 ----
+// 選択した患者について、選択月の「予約＋実施済」の単位数を集計。
+// 既存の実績集計ロジックとは独立してDBから取得する。
+async function loadPersonalAcquiredUnits(pid, ym){
+  if(!pid || !ym)return 0;
+  const [y,m]=ym.split('-').map(Number);
+  if(!y || !m)return 0;
+  const from=`${ym}-01`;
+  const last=new Date(y,m,0).getDate();
+  const to=`${ym}-${String(last).padStart(2,'0')}`;
+
+  const size=1000;
+  let start=0;
+  let total=0;
+
+  while(true){
+    const {data,error}=await sb.from('bookings')
+      .select('booking_date,time_slot,therapist,patient_id,status,unit')
+      .eq('patient_id',pid)
+      .gte('booking_date',from)
+      .lte('booking_date',to)
+      .in('status',['reserved','done'])
+      .range(start,start+size-1);
+
+    if(error)throw error;
+
+    const rows=data||[];
+    rows.forEach(b=>{
+      total+=Number(b.unit)||2;
+    });
+
+    if(rows.length<size)break;
+    start+=size;
+  }
+  return total;
+}
+
+async function initPersonalAcquiredUnits(){
+  const sel=document.getElementById('actuals-personal-patient');
+  const ym=document.getElementById('actuals-personal-month');
+  if(!sel||!ym)return;
+
+  const currentYm=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+  if(!ym.value)ym.value=currentYm;
+
+  const current=sel.value;
+  sel.innerHTML='<option value="">患者を選択</option>'+
+    Object.entries(patients||{})
+      .filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id))
+      .sort((a,b)=>(a[1].name||'').localeCompare(b[1].name||'','ja'))
+      .map(([id,p])=>`<option value="${escapeHtml(id)}">${escapeHtml(id)} ${escapeHtml(p.name||'')}</option>`)
+      .join('');
+
+  if(current&&patients[current]&&!isTentativePatient(current)&&!isArchivedPatient(current)){
+    sel.value=current;
+  }
+  await renderPersonalAcquiredUnits();
+}
+
+async function renderPersonalAcquiredUnits(){
+  const pidEl=document.getElementById('actuals-personal-patient');
+  const ymEl=document.getElementById('actuals-personal-month');
+  const out=document.getElementById('actuals-personal-units');
+  if(!pidEl||!ymEl||!out)return;
+
+  const pid=pidEl.value;
+  const ym=ymEl.value;
+  if(!pid||!ym){
+    out.textContent='0';
+    return;
+  }
+
+  out.textContent='集計中...';
+  try{
+    const total=await loadPersonalAcquiredUnits(pid,ym);
+    out.textContent=String(total);
+  }catch(e){
+    console.error('個人取得単位の集計失敗',e);
+    out.textContent='0';
+    showToast('個人取得単位の集計に失敗しました');
+  }
+}
+
 async function renderActuals(){
   const body=document.getElementById('actuals-body');if(!body)return;
   const sel=document.getElementById('actuals-fy');if(!sel.options.length)renderActualsFiscalYearSelect();
