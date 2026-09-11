@@ -3667,7 +3667,7 @@ function openAddPatient(){
     <div class="input-group">
       <label>患者ID（半角英数字）</label>
       <input type="text" id="np-id" placeholder="例：ft900001" autocapitalize="none"
-        oninput="checkPatientIdDuplicate(this.value)"
+        oninput="checkPatientIdDuplicate(this.value);loadReRegisterPatient(this.value)"
         style="letter-spacing:0.5px">
       <p id="np-id-warn" style="font-size:12px;margin-top:4px;display:none"></p>
     </div>
@@ -3697,7 +3697,11 @@ function checkPatientIdDuplicate(val){
   const warn=document.getElementById('np-id-warn');
   if(!warn)return;
   if(!id){warn.style.display='none';return;}
-  if(patients[id]){
+  if(patients[id] && isArchivedPatient(id)){
+    warn.textContent=`↻ 過去の登録データがあります（${patients[id].name}）`;
+    warn.style.color='#34C759';
+    warn.style.display='block';
+  } else if(patients[id]){
     warn.textContent=`⚠️ このIDはすでに使用されています（${patients[id].name}）`;
     warn.style.color='#FF3B30';
     warn.style.display='block';
@@ -3706,6 +3710,23 @@ function checkPatientIdDuplicate(val){
     warn.style.color='#34C759';
     warn.style.display='block';
   }
+}
+function loadReRegisterPatient(val){
+  const id=String(val||'').trim().toLowerCase();
+  const p=patients[id];
+  if(!p || !isArchivedPatient(id))return;
+  const setValue=(eid,value)=>{const el=document.getElementById(eid);if(el)el.value=value??'';};
+  setValue('np-name',p.name||'');
+  setValue('np-kana',p.kana||'');
+  setValue('np-dob',p.dob||'');
+  setValue('np-gender',p.gender||'男');
+  setValue('np-disease',p.disease||'');
+  setValue('np-th',p.therapist||staffList[0]?.id||'');
+  setValue('np-rehab-start',p.rehabStartDate||rehabStartDates[String(id)]||'');
+  setValue('np-rehab-billing-start',p.rehabBillingStartDate||rehabBillingStartDates[String(id)]||'');
+  setValue('np-care-insurance',(p.careInsurance||careInsurancePatients[String(id)])?'有':'無');
+  setValue('np-dl',p.deadline?dateStr(p.deadline):'');
+  setValue('np-note',p.note||'');
 }
 async function saveNewPatient(){
   const id=document.getElementById('np-id').value.trim().toLowerCase();
@@ -4512,7 +4533,21 @@ async function loadActualsData(fy){
 }
 function actualsSum(rows,fn){return rows.reduce((s,b)=>s+(fn(b)?Number(b.unit||2):0),0);}
 function actualsUnique(rows,fn){return new Set(rows.filter(fn).map(b=>b.patient_id).filter(Boolean)).size;}
-function actualsBusinessDays(ym){return monthDays(ym).filter(ds=>!isDayOff(ds)).length;}
+function actualsBusinessDayValue(ds){
+  // 実績表の営業日数：終日営業=1.0日、半日営業=0.5日、休診=0日。
+  // 臨時営業日は、登録時間や担当者数にかかわらず1.0日として扱う。
+  if(specialDays.some(s=>s.special_date===ds))return 1.0;
+  const hd=holidayData.find(h=>h.holiday_date===ds);
+  if(hd){
+    const period=hd.period||'full';
+    return period==='full'?0:0.5;
+  }
+  const status=getBusinessStatus(ds);
+  if(status==='full')return 1.0;
+  if(status==='am'||status==='pm')return 0.5;
+  return 0;
+}
+function actualsBusinessDays(ym){return monthDays(ym).reduce((sum,ds)=>sum+actualsBusinessDayValue(ds),0);}
 function actualsPtDays(ym,th){return monthDays(ym).filter(ds=>!isTherapistOff(ds,th)).length;}
 function actualsCapacity(ym,th){let n=0;monthDays(ym).forEach(ds=>{if(isTherapistOff(ds,th))return;timesForDate(ds,th).forEach(t=>{if(isSlotAvailable(ds,t,th))n+=2;});});return n;}
 // 予約空き数：実際に設定されている「空き枠」を1枠=2単位として集計。
