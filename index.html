@@ -747,7 +747,7 @@ function getJSTToday(){
   return new Date(jst.getUTCFullYear(),jst.getUTCMonth(),jst.getUTCDate());
 }
 const TODAY=getJSTToday();
-const TOMORROW=new Date(TODAY); TOMORROW.setDate(TOMORROW.getDate()+1);
+const TOMORROW=new Date(TODAY); TOMORROW.setUTCDate(TOMORROW.getUTCDate()+1);
 
 let ADMIN_PW="rehab2025";
 let clinicName="藤原整形外科リハビリ予約";
@@ -770,11 +770,11 @@ let weekTableWeekendMode=false;
 let leaveFilter='';
 let currentPid=null;
 let schedTherapist="",schedView="day",schedOffset=0;
-let calYear=TODAY.getFullYear(),calMonth=TODAY.getMonth(),calSelected=null;
+let calYear=TODAY.getUTCFullYear(),calMonth=TODAY.getUTCMonth(),calSelected=null;
 let adminBookSelected=null,bkWeekOffset=0,pubWeekOffset=0;
 let pubTherapist=null;
 let pubTargetDate=null;
-let topCalYear=TODAY.getFullYear(),topCalMonth=TODAY.getMonth();
+let topCalYear=TODAY.getUTCFullYear(),topCalMonth=TODAY.getUTCMonth();
 let topCalBookings={};
 let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
 
@@ -834,19 +834,21 @@ function populateStaffSelect(selectId,selectedId){
 // ---- HELPERS ----
 // dateStr: JSTローカル日付を YYYY-MM-DD 形式で返す（toISOStringはUTC基準なので使わない）
 function dateStr(d){
-  const y=d.getFullYear();
-  const m=String(d.getMonth()+1).padStart(2,'0');
-  const day=String(d.getDate()).padStart(2,'0');
+  // 日付軸は常に日本時間(JST)として扱い、ブラウザの端末タイムゾーンに依存しない。
+  // 日付専用DateはUTCフィールドで保持するため、海外端末でも日付が前後しない。
+  const y=d.getUTCFullYear();
+  const m=String(d.getUTCMonth()+1).padStart(2,'0');
+  const day=String(d.getUTCDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
 // 生年月日から現在年齢を算出（誕生日がまだ来ていない場合は1歳引く）
 function calcAge(dob,baseDate=TODAY){
   if(!dob)return null;
-  const d=new Date(`${dob}T00:00:00`);
+  const d=parseLocalDate(dob);
   if(Number.isNaN(d.getTime()))return null;
-  let age=baseDate.getFullYear()-d.getFullYear();
-  const birthdayPassed=(baseDate.getMonth()>d.getMonth()) ||
-    (baseDate.getMonth()===d.getMonth() && baseDate.getDate()>=d.getDate());
+  let age=baseDate.getUTCFullYear()-d.getUTCFullYear();
+  const birthdayPassed=(baseDate.getUTCMonth()>d.getUTCMonth()) ||
+    (baseDate.getUTCMonth()===d.getUTCMonth() && baseDate.getUTCDate()>=d.getUTCDate());
   if(!birthdayPassed)age--;
   return age>=0?age:null;
 }
@@ -855,10 +857,10 @@ function formatPatientDeadline(deadline){
   if(!deadline)return '～未設定';
   const d=deadline instanceof Date?deadline:new Date(deadline);
   if(Number.isNaN(d.getTime()))return '～未設定';
-  return `～${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+  return `～${d.getUTCFullYear()}/${d.getUTCMonth()+1}/${d.getUTCDate()}`;
 }
-function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
-function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
+function addDays(d,n){const r=new Date(d);r.setUTCDate(r.getUTCDate()+n);return r;}
+function monday(d){const r=new Date(d);r.setUTCDate(r.getUTCDate()-((d.getUTCDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
 function isLeave(ds,th){return leaves[th]&&leaves[th].has(ds);}
 
@@ -900,8 +902,8 @@ function isLeaveForBooking(ds,th,startTime,unit=2){
 // businessHoursMatrix で管理する。管理画面「設定」タブから編集可能。
 function getWeekNumberOfMonth(d){
   // その月の1日が何曜日か（日曜=0）
-  const firstDay=new Date(d.getFullYear(),d.getMonth(),1).getDay();
-  return Math.ceil((d.getDate()+firstDay)/7);
+  const firstDay=new Date(d.getUTCFullYear(),d.getUTCMonth(),1).getUTCDay();
+  return Math.ceil((d.getUTCDate()+firstDay)/7);
 }
 
 // デフォルトの営業ルール
@@ -928,7 +930,7 @@ function defaultBusinessHoursMatrix(){
 // 'full'（終日）/ 'am'（午前のみ）/ 'pm'（午後のみ）/ 'closed'（休診）
 function getBusinessStatus(ds){
   const d=parseLocalDate(ds);
-  const dow=d.getDay();
+  const dow=d.getUTCDay();
   const wn=getWeekNumberOfMonth(d);
   const key=`${dow}_${wn}`;
   return businessHoursMatrix[key]||'full';
@@ -1023,7 +1025,7 @@ function getSecondUnitTime(time){
 // timeが「枠設定」で定義された基準（前半）の時間かどうかに関わらず、
 // 対応する基準（前半）の時間を求める。timeが後半(+20分)の場合はその20分前を返す。
 function getBaseSlotTime(ds,therapist,time){
-  const dow=parseLocalDate(ds).getDay();
+  const dow=parseLocalDate(ds).getUTCDay();
   const defTimes=timesForDate(ds,therapist);
   const nt=normalizeTime(time);
   if(defTimes.includes(nt))return nt;
@@ -1100,7 +1102,7 @@ function isBookableStart(ds,therapist,time,unit=2){
 }
 // 指定日の「枠設定」による通常の時間帯＋臨時営業日で追加された時間帯を合算して返す
 function timesForDate(ds,therapist){
-  const dow=parseLocalDate(ds).getDay();
+  const dow=parseLocalDate(ds).getUTCDay();
   const defined=slotDefsForDay(dow,therapist);
   const special=getSpecialTimesForDay(ds,therapist);
   return [...new Set([...defined,...special])].sort((a,b)=>timeMins(a)-timeMins(b));
@@ -1162,10 +1164,10 @@ function receptionClosedNoticeHTML(){
   const ds=dateStr(TODAY);
   if(settings.end && ds>settings.end){
     const d=parseLocalDate(settings.end);
-    msg=`現在${d.getMonth()+1}月${d.getDate()}日以降の受付はできません。`;
+    msg=`現在${d.getUTCMonth()+1}月${d.getUTCDate()}日以降の受付はできません。`;
   } else if(settings.start && ds<settings.start){
     const d=parseLocalDate(settings.start);
-    msg=`予約受付は${d.getMonth()+1}月${d.getDate()}日からです。`;
+    msg=`予約受付は${d.getUTCMonth()+1}月${d.getUTCDate()}日からです。`;
   } else if(settings.tstart && settings.tend){
     msg=`本日の予約受付時間は${settings.tstart}〜${settings.tend}です。時間内に改めてお試しください。`;
   }
@@ -1190,7 +1192,7 @@ async function saveRehabBillingStartDates(){
 function calcRehabDeadline(inputDateStr){
   if(!inputDateStr)return '';
   const d=parseLocalDate(inputDateStr);
-  d.setDate(d.getDate()+150);
+  d.setUTCDate(d.getUTCDate()+150);
   return dateStr(d);
 }
 async function saveRehabStartDates(){
@@ -1564,6 +1566,7 @@ async function dbAddNotification(text, operator=null){
   // 操作主体はログイン経路からのみ決定する。
   // 管理者ログイン → admin
   // 患者IDログイン → 患者ID
+  // operator引数は互換性のため残すが、ログイン主体を優先して必ず正しい主体を保存する。
   const actor = getCurrentActor();
   if(!actor){
     console.error('通知保存中止：ログイン主体が確定していません', {text, currentActorType, currentActorPatientId});
@@ -1712,7 +1715,7 @@ async function dbDeletePatient(id){
   // 患者削除時は、実施済予約を「最大過去5年分」だけ履歴として保持する。
   // 5年より古い実施済予約は削除し、未実施の予約も削除する。
   const cutoff=addDays(TODAY,-(5*365));
-  cutoff.setFullYear(TODAY.getFullYear()-5);
+  cutoff.setFullYear(TODAY.getUTCFullYear()-5);
   const cutoffStr=dateStr(cutoff);
 
   const {error:oldDoneErr}=await sb.from('bookings').delete()
@@ -1754,7 +1757,7 @@ function topCalNav(delta){
 }
 async function loadTopCalendarBookings(){
   const from=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-01`;
-  const last=new Date(topCalYear,topCalMonth+1,0).getDate();
+  const last=new Date(Date.UTC(topCalYear,topCalMonth+1,0)).getUTCDate();
   const to=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
   try{
     const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit').gte('booking_date',from).lte('booking_date',to);
@@ -1813,12 +1816,12 @@ async function renderTopAvailabilityCalendar(){
   grid.innerHTML='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:10px">空き状況を確認中…</div>';
   // トップカレンダーも同じ予約キャッシュを最新DB値で更新してから判定する。
   const from=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-01`;
-  const last=new Date(topCalYear,topCalMonth+1,0).getDate();
+  const last=new Date(Date.UTC(topCalYear,topCalMonth+1,0)).getUTCDate();
   const to=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`;
   await refreshBookingsForDateRange(from,to);
-  const first=new Date(topCalYear,topCalMonth,1).getDay();
-  const dim=new Date(topCalYear,topCalMonth+1,0).getDate();
-  const prevDim=new Date(topCalYear,topCalMonth,0).getDate();
+  const first=new Date(Date.UTC(topCalYear,topCalMonth,1)).getUTCDay();
+  const dim=new Date(Date.UTC(topCalYear,topCalMonth+1,0)).getUTCDate();
+  const prevDim=new Date(Date.UTC(topCalYear,topCalMonth,0)).getUTCDate();
   let html='<div class="cal-grid">';
   DAY_NAMES.forEach(d=>html+=`<div class="cal-hd">${d}</div>`);
   for(let i=0;i<first;i++)html+=`<div class="top-cal-cell other">${prevDim-first+i+1}</div>`;
@@ -1826,7 +1829,7 @@ async function renderTopAvailabilityCalendar(){
     const ds=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const date=parseLocalDate(ds);
     const isPast=date<TODAY;
-    const isHolidayDay=isHoliday(ds)||date.getDay()===0;
+    const isHolidayDay=isHoliday(ds)||date.getUTCDay()===0;
     const hasOpen=topCalHasOpen(ds);
     let cls='top-cal-cell';
     if(isHolidayDay&&!hasOpen)cls+=' closed-day';
@@ -1991,7 +1994,7 @@ function renderPatientReminder(pid){
   if(ds===todayStr)label='🔔 本日の予約です！';
   else if(ds===tomorrowStr)label='🔔 明日の予約があります';
   if(label){
-    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     rEl.innerHTML=`<div class="remind-banner">${label}<br><span style="font-size:14px;font-weight:700">${m}月${day}日（${wd}） ${n.time}</span></div>`;
   } else {rEl.innerHTML='';}
 }
@@ -2082,11 +2085,11 @@ async function renderWeekTable(){
   const isWeekendView=weekTableWeekendMode;
 
   if(isWeekendView){
-    const labels=days.map(d=>`${d.getMonth()+1}月${d.getDate()}日（${['日','月','火','水','木','金','土'][d.getDay()]}）`);
+    const labels=days.map(d=>`${d.getUTCMonth()+1}月${d.getUTCDate()}日（${['日','月','火','水','木','金','土'][d.getUTCDay()]}）`);
     document.getElementById('weektable-label').textContent=labels.length?`週末営業：${labels.join('・')}`:'週末の営業はありません';
   }else{
     document.getElementById('weektable-label').textContent=
-      `${ws.getMonth()+1}月${ws.getDate()}日（月）〜${addDays(ws,4).getMonth()+1}月${addDays(ws,4).getDate()}日（金）`;
+      `${ws.getUTCMonth()+1}月${ws.getUTCDate()}日（月）〜${addDays(ws,4).getUTCMonth()+1}月${addDays(ws,4).getUTCDate()}日（金）`;
   }
 
   // 全スロット時間を収集（正規化して重複排除）
@@ -2115,14 +2118,14 @@ async function renderWeekTable(){
     <th style="border:1px solid #D1D1D6;padding:4px 6px;background:#F9FAFB;min-width:64px;position:sticky;left:0;z-index:2"></th>`;
   days.forEach(d=>{
     const ds=dateStr(d);
-    const dow=d.getDay();
+    const dow=d.getUTCDay();
     const anySpecial=staffList.some(s=>hasSpecialBusinessDay(ds,s.id));
     const off=isDayOff(ds)&&!anySpecial;
     const dayLabel=['日','月','火','水','木','金','土'][dow];
     const bg=off?'#F3F4F6':'#EFF6FF';
     html+=`<th colspan="${THERAPISTS.length}" onclick="weekTableBulkDoneModal('${ds}')" style="border:1px solid #D1D1D6;padding:5px 4px;background:${bg};text-align:center;min-width:${CELL_W};cursor:pointer" title="クリックすると一括実施済・一括キャンセルを選択できます">
       <div style="font-weight:600">${dayLabel}</div>
-      <div style="font-size:10px;color:#6B7280">${d.getMonth()+1}/${d.getDate()}</div>
+      <div style="font-size:10px;color:#6B7280">${d.getUTCMonth()+1}/${d.getUTCDate()}</div>
       ${off?'<div style="font-size:9px;color:#B00020">休診</div>':anySpecial?'<div style="font-size:9px;color:#8B4500">臨時営業</div>':''}
     </th>`;
   });
@@ -2228,7 +2231,7 @@ async function renderWeekTable(){
 
 function weekTableBulkDoneModal(ds){
   const d=parseLocalDate(ds);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   const counts=staffList.map(s=>{
     const statuses=bookingStatuses[ds]?.[s.id]||{};
     const reserved=Object.values(statuses).filter(st=>st==='reserved').length;
@@ -2285,7 +2288,7 @@ async function weekTableBulkCancel(ds,therapist){
 
 function weekTableBookModal(ds,therapist,time){
   const d=parseLocalDate(ds);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   // クリックされたtimeから、この枠の基準（前半）の時間を求める
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
@@ -2422,19 +2425,19 @@ async function weekTableDoBook(ds,therapist,time){
   const p=patients[pid];
   const d=parseLocalDate(ds);
   const unitNote=isHalf?'【1単位】':(isThreeUnits?'【3単位・60分】':'');
-  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
+  await dbAddNotification(`${p.name}（${pid}）${d.getUTCMonth()+1}/${d.getUTCDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
 
   // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
   let autoCount=0;
   if(auto==='monthly'){
     const baseDate=parseLocalDate(ds);
-    const baseMonth=baseDate.getMonth();
-    const baseYear=baseDate.getFullYear();
+    const baseMonth=baseDate.getUTCMonth();
+    const baseYear=baseDate.getUTCFullYear();
     for(let w=1;w<=5;w++){
       const nd=addDays(baseDate,w*7);
-      if(nd.getMonth()!==baseMonth||nd.getFullYear()!==baseYear)break;
+      if(nd.getUTCMonth()!==baseMonth||nd.getUTCFullYear()!==baseYear)break;
       const nds=dateStr(nd);
-      if(isTherapistOff(nds,therapist)||nd.getDay()===0)continue;
+      if(isTherapistOff(nds,therapist)||nd.getUTCDay()===0)continue;
       if(isOverDeadline(pid)){
         const usedUnits=await countMonthlyBookingUnits(pid,nds.substring(0,7));
         if(usedUnits+2>13)break;
@@ -2461,8 +2464,8 @@ function weekTableStatusModal(ds,therapist,time){
   const pid=bookings[ds]?.[therapist]?.[time];
   if(!pid)return;
   const p=patients[pid];
-  const d=new Date(ds);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const d=parseLocalDate(ds);
+  const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   const status=bookingStatuses[ds]?.[therapist]?.[time]||'reserved';
   if(status==='reference'){
     openModal(`<div class="modal-handle"></div>
@@ -2511,10 +2514,10 @@ async function wtConfirmReferenceMonth(ds,pid){
   const patientId=String(pid||'');
   if(!patientId){showToast('患者情報を取得できませんでした','#FF3B30');return;}
   const d=parseLocalDate(ds);
-  const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const ym=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
   const start=`${ym}-01`;
-  const end=dateStr(new Date(d.getFullYear(),d.getMonth()+1,0));
-  if(!confirm(`${patients[patientId]?.name||'この患者'} さんの ${d.getMonth()+1}月分にある参考予約をすべて予約確定しますか？`))return;
+  const end=dateStr(new Date(d.getUTCFullYear(),d.getUTCMonth()+1,0));
+  if(!confirm(`${patients[patientId]?.name||'この患者'} さんの ${d.getUTCMonth()+1}月分にある参考予約をすべて予約確定しますか？`))return;
   const {data,error}=await sb.from('bookings').update({status:'reserved'})
     .eq('patient_id',patientId).eq('status','reference')
     .gte('booking_date',start).lte('booking_date',end)
@@ -2531,7 +2534,7 @@ async function wtConfirmReferenceMonth(ds,pid){
   renderWeekTable();
   renderTodaySchedule();
   renderNotifications();
-  showToast(count>0?`${d.getMonth()+1}月分の参考予約 ${count}件を予約確定しました`:`${d.getMonth()+1}月分に参考予約はありません`,'#34C759');
+  showToast(count>0?`${d.getUTCMonth()+1}月分の参考予約 ${count}件を予約確定しました`:`${d.getUTCMonth()+1}月分に参考予約はありません`,'#34C759');
 }
 
 async function wtUpdateStatus(ds,therapist,time,status){
@@ -2581,7 +2584,7 @@ function renderLeaves(th){
   const typeLabel={'full':'全休','am':'午前半休','pm':'午後半休','hour':'時間休'};
   el.innerHTML=list.map(l=>{
     const d=parseLocalDate(l.leave_date);
-    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     const ht=typeLabel[l.half_type||'full']||'全休';
     const hourStr=(l.half_type==='hour'&&l.hour_time)?` ${l.hour_time}`:'';
     return `<div class="card" style="display:flex;align-items:center;gap:10px">
@@ -2717,7 +2720,7 @@ async function renderPublicSlots(){
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
   const we=addDays(ws,4);
   const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
-  const selectedDow=selectedDate?selectedDate.getDay():-1;
+  const selectedDow=selectedDate?selectedDate.getUTCDay():-1;
   // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
   // その選択日だけを表示する（「空きあり」なのに予約画面で空きが消える不整合を防ぐ）。
   const selectedWeekend=selectedDate && (selectedDow===0||selectedDow===6);
@@ -2729,18 +2732,18 @@ async function renderPublicSlots(){
   const loadTo=dateStr(selectedWeekend?selectedDate:addDays(ws,4));
   await refreshBookingsForDateRange(loadFrom,loadTo);
   document.getElementById('pub-week-label').textContent=
-    `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
+    `${labelStart.getUTCMonth()+1}/${labelStart.getUTCDate()} 〜 ${labelEnd.getUTCMonth()+1}/${labelEnd.getUTCDate()}`;
   let html='';let anyOpen=false;
   for(const d of displayDates){
     const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
-    const dow=d.getDay();
+    const dow=d.getUTCDay();
     const times=timesForDate(ds,pubTherapist);
     if(!times.length)continue;
     if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,pubTherapist)){
       html+=`<div class="card" style="padding:12px;margin-bottom:8px">
-        <div style="font-size:17px;font-weight:700;margin-bottom:8px">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:8px">${DAY_NAMES[dow]}曜日 ${d.getUTCMonth()+1}/${d.getUTCDate()}</div>
         <div style="font-size:12px;color:#B00020">🔴 休診日</div>
       </div>`;
       continue;
@@ -2752,10 +2755,10 @@ async function renderPublicSlots(){
     if(!openTimes.length)continue;
     anyOpen=true;
     html+=`<div class="card" style="padding:12px;margin-bottom:8px">
-      <div style="font-size:17px;font-weight:700;margin-bottom:10px">${DAY_NAMES[dow]}曜日&nbsp; <span style="font-size:17px;color:#000;font-weight:700">${d.getMonth()+1}/${d.getDate()}</span></div>
+      <div style="font-size:17px;font-weight:700;margin-bottom:10px">${DAY_NAMES[dow]}曜日&nbsp; <span style="font-size:17px;color:#000;font-weight:700">${d.getUTCMonth()+1}/${d.getUTCDate()}</span></div>
       <div style="display:flex;flex-direction:column;gap:6px">`;
     openTimes.forEach(t=>{
-      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="pubBookModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${t}','${ds}')"><span style="font-size:17px;font-weight:400">${t}</span><span style="font-size:12px;color:#1A7F47">空き ○ タップで予約</span></div>`;
+      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="pubBookModal('${DAY_NAMES[dow]}曜','${d.getUTCMonth()+1}/${d.getUTCDate()}','${t}','${ds}')"><span style="font-size:17px;font-weight:400">${t}</span><span style="font-size:12px;color:#1A7F47">空き ○ タップで予約</span></div>`;
     });
     html+='</div></div>';
   }
@@ -2815,9 +2818,9 @@ function patientLogin(){
 }
 
 function getWeekdayLabelFromMonthDay(month,day){
-  const y=(typeof TODAY!=='undefined' && TODAY instanceof Date)?TODAY.getFullYear():new Date().getFullYear();
-  const d=new Date(y,Number(month)-1,Number(day));
-  return ['日','月','火','水','木','金','土'][d.getDay()];
+  const y=(typeof TODAY!=='undefined' && TODAY instanceof Date)?TODAY.getUTCFullYear():new Date().getUTCFullYear();
+  const d=new Date(Date.UTC(y,Number(month)-1,Number(day)));
+  return ['日','月','火','水','木','金','土'][d.getUTCDay()];
 }
 function getDismissedStaffReplyIds(pid){
   try{return new Set(JSON.parse(localStorage.getItem('staffReplyDismissed_'+String(pid))||'[]').map(String));}
@@ -2876,7 +2879,7 @@ function renderMyBook(){
   } else {
     upcoming.forEach(u=>{
       const d=parseLocalDate(u.date);
-      const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+      const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
       const isToday=dateStr(d)===dateStr(TODAY);
       const isTomorrow=dateStr(d)===dateStr(TOMORROW);
       const label=isToday?'<span class="badge badge-danger" style="margin-left:6px">本日</span>':
@@ -2912,7 +2915,7 @@ function renderBanner(){
   const el=document.getElementById('p-banner');
   if(upcoming.length){
     const n=upcoming[0];const d=parseLocalDate(n.date);
-    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     el.innerHTML=`<div class="next-banner">
       <div class="next-banner-label">次回の予約</div>
       <div class="next-banner-date">${m}月${day}日（${wd}） ${n.time}</div>
@@ -2929,7 +2932,7 @@ function renderUpcoming(){
   let html='<div style="font-size:14px;font-weight:600;margin-bottom:10px">今後の予定一覧</div>';
   if(!upcoming.length){html+='<div class="empty">📅 予約はありません</div>';}
   else upcoming.forEach(u=>{
-    const d=parseLocalDate(u.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const d=parseLocalDate(u.date);const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1"><div style="font-weight:600;font-size:15px">${m}月${day}日（${wd}） ${u.time}</div>
       <div style="font-size:12px;color:#8E8E93;margin-top:2px">${getStaffName(u.therapist)} ／ 40分 ／ 2単位</div></div>
@@ -2981,16 +2984,16 @@ async function renderResSlots(){
   // 患者側の予約画面も、トップ・公開画面・週間表と同じ最新予約情報を使用する。
   await refreshBookingsForDateRange(dateStr(ws),dateStr(we));
   const wl=document.getElementById('res-week-label');
-  if(wl)wl.textContent=`${ws.getMonth()+1}/${ws.getDate()} 〜 ${we.getMonth()+1}/${we.getDate()}`;
+  if(wl)wl.textContent=`${ws.getUTCMonth()+1}/${ws.getUTCDate()} 〜 ${we.getUTCMonth()+1}/${we.getUTCDate()}`;
   let html='';let anyOpen=false;
   for(let i=0;i<5;i++){
     const d=addDays(ws,i);const ds=dateStr(d);
     if(d<TODAY)continue;
     if(!isDateWithinReception(ds))continue;
-    const dow=d.getDay();
+    const dow=d.getUTCDay();
     const times=timesForDate(ds,resTherapist);
     if(!times.length)continue;
-    if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,resTherapist)){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
+    if((isHoliday(ds)||dow===0)&&!hasSpecialBusinessDay(ds,resTherapist)){html+=`<div style="margin-bottom:8px;font-size:12px;color:#B00020">🔴 ${d.getUTCMonth()+1}/${d.getUTCDate()}（${DAY_NAMES[dow]}）休診日</div>`;continue;}
     ensureBookingShape(ds);
     const openTimes=times
       .filter(t=>isOpenStartFromCurrentCache(ds,resTherapist,t))
@@ -2998,10 +3001,10 @@ async function renderResSlots(){
     if(!openTimes.length)continue;
     anyOpen=true;
     html+=`<div style="margin-bottom:12px">
-      <p style="font-size:13px;font-weight:600;margin-bottom:6px;color:#8E8E93">${DAY_NAMES[dow]}曜日 ${d.getMonth()+1}/${d.getDate()}</p>
+      <p style="font-size:13px;font-weight:600;margin-bottom:6px;color:#8E8E93">${DAY_NAMES[dow]}曜日 ${d.getUTCMonth()+1}/${d.getUTCDate()}</p>
       <div style="display:flex;flex-direction:column;gap:6px">`;
     openTimes.forEach(time=>{
-      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="showReserveModal('${DAY_NAMES[dow]}曜','${d.getMonth()+1}/${d.getDate()}','${time}','${ds}','${resTherapist}')"><span style="font-size:15px;font-weight:600">${time}</span><span style="font-size:12px;color:#1A7F47">タップで予約</span></div>`;
+      html+=`<div class="slot open" style="justify-content:flex-start;gap:10px;padding:12px 16px" onclick="showReserveModal('${DAY_NAMES[dow]}曜','${d.getUTCMonth()+1}/${d.getUTCDate()}','${time}','${ds}','${resTherapist}')"><span style="font-size:15px;font-weight:600">${time}</span><span style="font-size:12px;color:#1A7F47">タップで予約</span></div>`;
     });
     html+='</div></div>';
   }
@@ -3017,7 +3020,7 @@ function renderHistory(){
   const el=document.getElementById('ptab-history');
   let html='<div style="font-size:14px;font-weight:600;margin-bottom:10px">受診履歴</div>';
   p.history.forEach(h=>{
-    const d=parseLocalDate(h.date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const d=parseLocalDate(h.date);const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     html+=`<div class="card" style="display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:14px;font-weight:500">${m}月${day}日（${wd}）</span>
       <span class="badge badge-ok">✓ 実施済</span>
@@ -3028,7 +3031,7 @@ function renderHistory(){
 }
 
 function showCancelModal(date,time,therapist){
-  const d=parseLocalDate(date);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const d=parseLocalDate(date);const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">⚠️ キャンセル確認</div>
     <p style="font-size:14px;color:#8E8E93;margin-bottom:14px">${m}月${day}日（${wd}） ${time}</p>
@@ -3074,7 +3077,7 @@ async function doCancel(date,time,therapist){
   const ok=await dbCancelSlot(date,therapist,time);
   if(!ok){showToast('キャンセル処理に失敗しました');btn.disabled=false;btn.textContent='キャンセル確定';return;}
   const d=parseLocalDate(date);
-  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,currentPid);
+  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getUTCMonth()+1}/${d.getUTCDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,currentPid);
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
@@ -3127,7 +3130,7 @@ function adminLogin(){
     document.getElementById('admin-err').style.display='none';
     document.getElementById('admin-pw').value='';
     const now=getJSTToday();
-    document.getElementById('admin-date-sub').textContent=`${now.getFullYear()}年${now.getMonth()+1}月`;
+    document.getElementById('admin-date-sub').textContent=`${now.getUTCFullYear()}年${now.getUTCMonth()+1}月`;
     renderNotifications();renderDeadline();renderSettingsDisplay();
     renderTodaySchedule();
     weekTableOffset=0;
@@ -3165,10 +3168,11 @@ const STAFF_REPLY_MARK='\n【担当者より】';
 function isPatientBookingChange(n){
   if(!n || !n.operator || n.operator==='admin' || n.operator==='system')return false;
   const msg=String(n.text||'');
+  // 管理者が代理操作した履歴には「【管理者】」が付くため、
+  // operatorの過去データに誤りがあっても患者側通知へ混入させない。
+  if(msg.includes('【管理者】') || msg.includes('[管理者]'))return false;
   if(msg.includes(PATIENT_MESSAGE_MARK))return false;
-  // 患者IDでの予約操作は operator に患者IDが保存される。
-  // 患者情報の読み込み状況に左右されないよう、患者一覧との照合は行わず、
-  // 予約変更通知として保存される文言で判定する。
+  // 患者IDで行った予約・キャンセルだけを対象とする。
   return msg.includes('キャンセル') || msg.includes('に予約');
 }
 function getOriginalNotificationText(n){
@@ -3285,16 +3289,16 @@ async function dismissNotif(id){
 // ---- CALENDAR ----
 function renderCal(){
   document.getElementById('cal-label').textContent=`${calYear}年${calMonth+1}月`;
-  const first=new Date(calYear,calMonth,1).getDay();
-  const dim=new Date(calYear,calMonth+1,0).getDate();
-  const prevDim=new Date(calYear,calMonth,0).getDate();
+  const first=new Date(Date.UTC(calYear,calMonth,1)).getUTCDay();
+  const dim=new Date(Date.UTC(calYear,calMonth+1,0)).getUTCDate();
+  const prevDim=new Date(Date.UTC(calYear,calMonth,0)).getUTCDate();
   let html='<div class="cal-grid" style="margin-bottom:4px">';
   DAY_NAMES.forEach(d=>html+=`<div class="cal-hd">${d}</div>`);
   for(let i=0;i<first;i++)html+=`<div class="cal-cell other">${prevDim-first+i+1}</div>`;
   for(let d=1;d<=dim;d++){
     const ds=`${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isT=ds===dateStr(TODAY);
-    const isH=isHoliday(ds)||new Date(ds).getDay()===0;
+    const isH=isHoliday(ds)||new Date(ds).getUTCDay()===0;
     const hasA=bookings[ds]?staffList.some(s=>Object.values(bookings[ds][s.id]||{}).some(v=>v)):false;
     const isSel=calSelected===ds;
     let cls='cal-cell';
@@ -3311,7 +3315,7 @@ function renderCal(){
 }
 function calClick(ds){
   calSelected=ds;renderCal();
-  const d=parseLocalDate(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const d=parseLocalDate(ds);const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   const appts=[];
   if(bookings[ds]){
     staffList.forEach(s=>{
@@ -3349,7 +3353,7 @@ function renderSchedule(){
   const label=document.getElementById('sched-label');
   const d=addDays(TODAY,schedOffset);
   const ds=dateStr(d);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   const anySpecialToday=staffList.some(s=>hasSpecialBusinessDay(ds,s.id));
   const isOff=isDayOff(ds)&&!anySpecialToday;
   label.textContent=`${m}月${day}日（${wd}）${isOff?'  🔴休診':''}`;
@@ -3424,7 +3428,7 @@ function loadStatusSlots(){
   const ds=document.getElementById('st-date').value;
   if(!ds){document.getElementById('status-slots').innerHTML='';return;}
   ensureBookingShape(ds);
-  const d=new Date(ds);
+  const d=parseLocalDate(ds);
   let html='';
   staffList.forEach(s=>{
     const th=s.id;
@@ -3550,8 +3554,10 @@ async function deleteSlotDef(id){
 // ---- HOLIDAYS ----
 // JST安全な日付パース（"YYYY-MM-DD"文字列をローカル時刻として解釈）
 function parseLocalDate(ds){
-  const [y,m,d]=ds.split('-').map(Number);
-  return new Date(y,m-1,d);
+  // YYYY-MM-DDはカレンダー上の日付なので、端末ローカル時刻ではなくUTCの0時を
+  // 「日本時間の日付を表すDate」として使用する。これにより海外端末でも日付がずれない。
+  const [y,m,d]=String(ds||'').split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d));
 }
 
 function renderHolidays(){
@@ -3561,7 +3567,7 @@ function renderHolidays(){
   let html='';
   [...holidayData].sort((a,b)=>a.holiday_date.localeCompare(b.holiday_date)).forEach(hd=>{
     const d=parseLocalDate(hd.holiday_date);
-    const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
+    const m=d.getUTCMonth()+1,day=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
     const pl=periodLabel[hd.period||'full']||'全日休診';
     html+=`<div class="card" style="display:flex;align-items:center;gap:10px">
       <div style="flex:1">
@@ -3615,9 +3621,9 @@ async function renderLogs(){
 // ---- DEADLINE ----
 function renderDeadline(){
   const tb=document.getElementById('dl-tb');
-  const base=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
-  const thisMonthEnd=new Date(TODAY.getFullYear(),TODAY.getMonth()+1,0);
-  const nextMonthEnd=new Date(TODAY.getFullYear(),TODAY.getMonth()+2,0);
+  const base=new Date(Date.UTC(TODAY.getUTCFullYear(),TODAY.getUTCMonth(),1));
+  const thisMonthEnd=new Date(Date.UTC(TODAY.getUTCFullYear(),TODAY.getUTCMonth()+1,0));
+  const nextMonthEnd=new Date(Date.UTC(TODAY.getUTCFullYear(),TODAY.getUTCMonth()+2,0));
   const rows=Object.keys(patients)
     .filter(id=>!isTentativePatient(id)&&!isArchivedPatient(id)&&patients[id].deadline)
     .map(id=>{
@@ -3648,8 +3654,8 @@ function renderDeadline(){
   }
 
   let html='';
-  html+=section(`${TODAY.getMonth()+1}月`,thisMonth);
-  html+=section(`${TODAY.getMonth()+2}月`,nextMonth);
+  html+=section(`${TODAY.getUTCMonth()+1}月`,thisMonth);
+  html+=section(`${TODAY.getUTCMonth()+2}月`,nextMonth);
   html+=section('期限内の患者',later);
   html+=section('期限切れの患者',expired);
   if(!html)html='<tr><td colspan="5" style="text-align:center;color:#8E8E93;padding:20px">該当する患者はいません</td></tr>';
@@ -3781,7 +3787,7 @@ async function saveNewPatient(){
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?parseLocalDate(dl):parseLocalDate('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   const ok=await dbAddPatient(id,newP);
@@ -3835,7 +3841,7 @@ async function saveEditPatient(id){
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').value==='有',
-    deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
+    deadline:document.getElementById('ep-dl').value?parseLocalDate(document.getElementById('ep-dl').value):p.deadline,
     note:document.getElementById('ep-note').value};
   const btn=document.getElementById('ep-submit');btn.disabled=true;btn.textContent='保存中...';
   const ok=await dbUpdatePatient(id,updated);
@@ -3897,7 +3903,7 @@ async function doExcelImport(){
       if(!id||patients[id])continue;
       const newP={name:cols[1]?.trim()||'',kana:cols[2]?.trim()||'',dob:cols[3]?.trim()||'',gender:cols[4]?.trim()||'男',
         disease:cols[5]?.trim()||'',therapist:cols[6]?.trim()||(staffList[0]?.id||''),
-        rehabStartDate:cols[7]?.trim()||'',deadline:cols[8]?new Date(cols[8].trim()):new Date('2025-12-31'),history:[],note:''};
+        rehabStartDate:cols[7]?.trim()||'',deadline:cols[8]?parseLocalDate(cols[8].trim()):parseLocalDate('2025-12-31'),history:[],note:''};
       const ok=await dbAddPatient(id,newP);
       if(ok){patients[id]=newP;rehabStartDates[String(id)]=newP.rehabStartDate||'';count++;}
     }
@@ -3932,7 +3938,7 @@ function exportCSV(){
   const a=document.createElement('a');
   a.href=url;
   const now=getJSTToday();
-  a.download=`患者データ_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
+  a.download=`患者データ_${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   showToast(`${rows.length}件のCSVを出力しました`,'#34C759');
@@ -3973,7 +3979,7 @@ async function countMonthlyBookingUnits(pid,yearMonth){
   // DBを直接集計し、ローカルの週間表キャッシュに依存しない。
   const start=`${yearMonth}-01`;
   const [y,m]=yearMonth.split('-').map(Number);
-  const end=dateStr(new Date(y,m,0));
+  const end=dateStr(new Date(Date.UTC(y,m,0)));
   const {data,error}=await sb.from('bookings')
     .select('unit,status')
     .eq('patient_id',pid)
@@ -4130,8 +4136,8 @@ async function applyBasicBookingMonth(){
   let ym=monthEl?.value||'';
   const therapist=therapistEl?.value||'';
   if(!ym){
-    const d=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
-    ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const d=new Date(Date.UTC(TODAY.getUTCFullYear(),TODAY.getUTCMonth(),1));
+    ym=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
     if(monthEl)monthEl.value=ym;
   }
   if(!therapist){showToast('担当者を選択してください','#FF9500');return;}
@@ -4156,10 +4162,10 @@ async function applyBasicBookingMonth(){
   for(const pat of patterns){
     for(const ds of monthDates){
       const d=parseLocalDate(ds);
-      if(d.getDay()!==pat.dow)continue;
+      if(d.getUTCDay()!==pat.dow)continue;
 
       // 枠設定に存在しない日、休診日、担当者休暇は対象外。
-      if(!slotDefsForDay(d.getDay(),pat.therapist).includes(pat.time) || isTherapistOff(ds,pat.therapist)){
+      if(!slotDefsForDay(d.getUTCDay(),pat.therapist).includes(pat.time) || isTherapistOff(ds,pat.therapist)){
         closed++;continue;
       }
       ensureBookingShape(ds);
@@ -4271,7 +4277,7 @@ function saveConfirmedSpecialDayIds(){
 }
 function renderSpecialDayRow(s, confirmed=false){
   const d=parseLocalDate(s.special_date);
-  const mo=d.getMonth()+1,da=d.getDate(),wd=DAY_NAMES[d.getDay()];
+  const mo=d.getUTCMonth()+1,da=d.getUTCDate(),wd=DAY_NAMES[d.getUTCDay()];
   return `<div class="card" style="display:flex;align-items:center;gap:10px">
     <div style="flex:1">
       <span style="font-size:14px;font-weight:500">${mo}月${da}日（${wd}） ${s.time_slot}</span>
@@ -4287,7 +4293,7 @@ function renderSpecialDaysList(){
   if(!el)return;
   const active=[...specialDays].filter(s=>!Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)))
     .sort((a,b)=>a.special_date===b.special_date?timeMins(a.time_slot)-timeMins(b.time_slot):a.special_date.localeCompare(b.special_date));
-  const fiveYearsAgo=new Date(TODAY.getFullYear()-5,TODAY.getMonth(),TODAY.getDate());
+  const fiveYearsAgo=new Date(Date.UTC(TODAY.getUTCFullYear()-5,TODAY.getUTCMonth(),TODAY.getUTCDate()));
   const cutoff=dateStr(fiveYearsAgo);
   const past=[...specialDays].filter(s=>Object.prototype.hasOwnProperty.call(confirmedSpecialDayIds,String(s.id)) && s.special_date>=cutoff)
     .sort((a,b)=>b.special_date===a.special_date?timeMins(b.time_slot)-timeMins(a.time_slot):b.special_date.localeCompare(a.special_date));
@@ -4527,10 +4533,10 @@ async function saveBusinessHours(){
 let actualsBookingsCache=[];
 let actualsPriceSettings={rehab2:0,rehab3:0,plan:0,med1:0,med2:0};
 
-function getCurrentFiscalYear(){return TODAY.getMonth()>=3?TODAY.getFullYear():TODAY.getFullYear()-1;}
+function getCurrentFiscalYear(){return TODAY.getUTCMonth()>=3?TODAY.getUTCFullYear():TODAY.getUTCFullYear()-1;}
 function reiwaYear(fy){return fy-2018;}
 function fiscalMonths(fy){const a=[];for(let i=0;i<12;i++){const m=((3+i)%12)+1,y=m>=4?fy:fy+1;a.push({year:y,month:m,ym:`${y}-${String(m).padStart(2,'0')}`});}return a;}
-function monthDays(ym){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate();return Array.from({length:n},(_,i)=>`${ym}-${String(i+1).padStart(2,'0')}`);}
+function monthDays(ym){const [y,m]=ym.split('-').map(Number),n=new Date(Date.UTC(y,m,0)).getUTCDate();return Array.from({length:n},(_,i)=>`${ym}-${String(i+1).padStart(2,'0')}`);}
 function isCountableBookedStatus(s){return s==='reserved'||s==='done'||s==='noshow';}
 async function fetchBookingsPaged(from,to){
   const size=1000;let start=0,all=[];
@@ -4635,7 +4641,7 @@ async function loadPersonalAcquiredUnits(pid, ym){
   const [y,m]=ym.split('-').map(Number);
   if(!y || !m)return 0;
   const from=`${ym}-01`;
-  const last=new Date(y,m,0).getDate();
+  const last=new Date(Date.UTC(y,m,0)).getUTCDate();
   const to=`${ym}-${String(last).padStart(2,'0')}`;
 
   const size=1000;
@@ -4669,7 +4675,7 @@ async function initPersonalAcquiredUnits(){
   const ym=document.getElementById('actuals-personal-month');
   if(!sel||!ym)return;
 
-  const currentYm=`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+  const currentYm=`${TODAY.getUTCFullYear()}-${String(TODAY.getUTCMonth()+1).padStart(2,'0')}`;
   if(!ym.value)ym.value=currentYm;
 
   const current=sel.value;
