@@ -1205,6 +1205,27 @@ async function saveArchivedPatientIds(){
 }
 
 // ---- LOAD ----
+// 未確認のお知らせは固定件数だけ取得せず、ページングして取得する。
+// これにより、患者IDで追加予約された「患者からの予約変更」が、
+// 直近40件を超えた場合でも管理者ダッシュボードに表示される。
+async function fetchActiveNotificationsPaged(){
+  const size=1000;
+  let start=0;
+  const all=[];
+  while(true){
+    const {data,error}=await sb.from('notifications')
+      .select('id,message,created_at,operator')
+      .eq('dismissed',false)
+      .order('created_at',{ascending:false})
+      .range(start,start+size-1);
+    if(error)throw error;
+    const rows=data||[];
+    all.push(...rows);
+    if(rows.length<size)break;
+    start+=size;
+  }
+  return {data:all,error:null};
+}
 async function loadAllData(){
   // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
@@ -1217,8 +1238,7 @@ async function loadAllData(){
     sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
     sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
-    sb.from('notifications').select('id,message,created_at,operator')
-      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
+    fetchActiveNotificationsPaged(),
     sb.from('special_business_days').select('*'),
   ]);
 
@@ -3143,11 +3163,12 @@ let notifShowCount={patient:5,admin:5};
 // 追加のDBカラム／テーブルは使用しない。
 const STAFF_REPLY_MARK='\n【担当者より】';
 function isPatientBookingChange(n){
-  if(!n || !n.operator || n.operator==='admin')return false;
-  const patientIds=new Set(Object.keys(patients||{}).map(String));
-  if(!patientIds.has(String(n.operator)))return false;
+  if(!n || !n.operator || n.operator==='admin' || n.operator==='system')return false;
   const msg=String(n.text||'');
   if(msg.includes(PATIENT_MESSAGE_MARK))return false;
+  // 患者IDでの予約操作は operator に患者IDが保存される。
+  // 患者情報の読み込み状況に左右されないよう、患者一覧との照合は行わず、
+  // 予約変更通知として保存される文言で判定する。
   return msg.includes('キャンセル') || msg.includes('に予約');
 }
 function getOriginalNotificationText(n){
@@ -3210,7 +3231,7 @@ function renderNotifications(){
         ${action}
       </div>`;
     }).join('');
-    const remaining=Math.min(list.length-showCount,20-showCount);
+    const remaining=list.length-showCount;
     if(remaining>0){
       html+=`<div style="text-align:center;padding:8px 0">
         <button class="btn btn-sm" onclick="notifShowMore('${type}')">さらに表示（残り${remaining}件）</button>
@@ -3228,7 +3249,11 @@ function renderNotifications(){
 }
 
 function notifShowMore(type){
-  notifShowCount[type]=Math.min(notifShowCount[type]+5,20);
+  // 「患者からの予約変更」「管理者による操作」は、件数上限を設けず
+  // 取得済みの通知をすべて表示する。
+  const listType=type==='patient'?'patient':'admin';
+  const source=notifications.filter(n=>listType==='patient'?isPatientBookingChange(n):n.operator==='admin');
+  notifShowCount[type]=source.length;
   renderNotifications();
 }
 
@@ -4714,6 +4739,8 @@ async function renderActuals(){
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
 
+    const avg=actual.map((v,i)=>work[i]?v/work[i]/Math.max(1,staffList.length):0);
+
     // 担当者別は、その月に「実施済」になった患者のユニーク人数。
     const staffPatients=staffList.map(t=>rows.map(r=>actualsUnique(r,b=>b.status==='done'&&b.therapist===t.id)));
     // 運動器患者数は、担当者別患者数の総和。
@@ -4748,26 +4775,9 @@ async function renderActuals(){
 
 
     const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
-    // 担当者別平均取得単位数は「担当者の月総単位数 ÷（営業日数－その担当者の年休日数）」で算出。
-    // 年休は、その日の営業日数（終日=1.0、半日=0.5、特別営業日=1.0）に応じて差し引く。
-    const actualsPtAnnualLeaveDays=(ym,th)=>monthDays(ym).reduce((sum,ds)=>{
-      const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
-      if(!lv||lv.label!=='年休')return sum;
-      return sum+actualsBusinessDayValue(ds);
-    },0);
-    const actualsPtEffectiveDays=(ym,th)=>Math.max(0,actualsBusinessDays(ym)-actualsPtAnnualLeaveDays(ym,th));
-    const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtEffectiveDays(months[i].ym,t.id);return d?v/d:0;}));
+    const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtDays(months[i].ym,t.id);return d?v/d:0;}));
     const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
-    // 全体の平均取得単位数は、担当者ごとの平均取得単位数を足して人数で割る。
-    const avg=months.map((m,i)=>{
-      if(!staffList.length)return 0;
-      return staffList.reduce((sum,t,ti)=>sum+tav[ti][i],0)/staffList.length;
-    });
-    const staffYearAvg=staffList.map((t,i)=>{
-      const days=months.reduce((s,m)=>s+actualsPtEffectiveDays(m.ym,t.id),0);
-      return days?total(ta[i])/days:0;
-    });
-    const allAvg=staffYearAvg.length?staffYearAvg.reduce((s,v)=>s+v,0)/staffYearAvg.length:0;
+    const allAvg=work.reduce((s,v)=>s+v,0)?tAct/work.reduce((s,v)=>s+v,0)/Math.max(1,staffList.length):0;
 
     let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
       <tr class="section"><td colspan="${months.length+2}">基本実績</td></tr>
@@ -4779,7 +4789,7 @@ async function renderActuals(){
       ${arow('予約空き数',open.map(afmt).concat(afmt(total(open)/12)))}
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
-      ${staffList.map((t,i)=>arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(staffYearAvg[i])),'average')).join('')}
+      ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
       ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
