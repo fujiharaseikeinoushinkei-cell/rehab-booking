@@ -740,11 +740,11 @@ const DAY_NAMES=['日','月','火','水','木','金','土'];
 // ---- タイムゾーン修正：日本時間(JST)で今日の日付を正しく取得 ----
 function getJSTToday(){
   const now=new Date();
-  // UTCオフセットをJST(+9時間)に合わせて補正
-  const jst=new Date(now.getTime()+9*60*60*1000);
-  jst.setUTCHours(0,0,0,0);
-  // ローカルのDateオブジェクトとして返す
-  return new Date(jst.getUTCFullYear(),jst.getUTCMonth(),jst.getUTCDate());
+  // 現在時刻をJST(+9時間)へ変換し、そのJST日付をUTCの0時として保持する。
+  // dateStr()等の日付専用処理もUTCフィールドで統一しているため、端末のタイムゾーンに依存しない。
+  const jstMs=now.getTime()+9*60*60*1000;
+  const jst=new Date(jstMs);
+  return new Date(Date.UTC(jst.getUTCFullYear(),jst.getUTCMonth(),jst.getUTCDate()));
 }
 const TODAY=getJSTToday();
 const TOMORROW=new Date(TODAY); TOMORROW.setUTCDate(TOMORROW.getUTCDate()+1);
@@ -1566,7 +1566,6 @@ async function dbAddNotification(text, operator=null){
   // 操作主体はログイン経路からのみ決定する。
   // 管理者ログイン → admin
   // 患者IDログイン → 患者ID
-  // operator引数は互換性のため残すが、ログイン主体を優先して必ず正しい主体を保存する。
   const actor = getCurrentActor();
   if(!actor){
     console.error('通知保存中止：ログイン主体が確定していません', {text, currentActorType, currentActorPatientId});
@@ -3168,11 +3167,10 @@ const STAFF_REPLY_MARK='\n【担当者より】';
 function isPatientBookingChange(n){
   if(!n || !n.operator || n.operator==='admin' || n.operator==='system')return false;
   const msg=String(n.text||'');
-  // 管理者が代理操作した履歴には「【管理者】」が付くため、
-  // operatorの過去データに誤りがあっても患者側通知へ混入させない。
+  // 管理者の代理操作には必ず「【管理者】」が付くため、operatorの過去データに誤りがあっても患者側へ混入させない。
   if(msg.includes('【管理者】') || msg.includes('[管理者]'))return false;
   if(msg.includes(PATIENT_MESSAGE_MARK))return false;
-  // 患者IDで行った予約・キャンセルだけを対象とする。
+  // 患者IDログインによる予約・キャンセルだけを対象とする。
   return msg.includes('キャンセル') || msg.includes('に予約');
 }
 function getOriginalNotificationText(n){
@@ -3208,7 +3206,7 @@ function renderNotifications(){
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
   const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
-  const adminNotifs=notifications.filter(n=>n.operator==='admin');
+  const adminNotifs=notifications.filter(n=>n.operator==='admin' || String(n.text||'').includes('【管理者】') || String(n.text||'').includes('[管理者]'));
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
   cnt.style.display=total?'inline-flex':'none';
