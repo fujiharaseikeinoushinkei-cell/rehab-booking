@@ -1232,7 +1232,8 @@ async function loadAllData(){
   // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
+  const historyFrom=dateStr(addDays(TODAY,-(5*365)));
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,histRes,ndRes,spRes]=await Promise.all([
     sb.from('system_settings').select('*'),
     sb.from('slot_definitions').select('*').eq('is_active',true),
     sb.from('holidays').select('holiday_date,label,period'),
@@ -1240,6 +1241,8 @@ async function loadAllData(){
     sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
     sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
+    sb.from('bookings').select('booking_date,time_slot,patient_id,status')
+      .eq('status','done').gte('booking_date',historyFrom).lte('booking_date',dateStr(TODAY)),
     fetchActiveNotificationsPaged(),
     sb.from('special_business_days').select('*'),
   ]);
@@ -1338,6 +1341,19 @@ async function loadAllData(){
       rehabStartDate:rehabStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
+  });
+
+  // 受診履歴：現在の予約枠取得期間とは分離し、過去5年の実施済予約から患者別に復元する。
+  const historyRows=(histRes&&histRes.data)?histRes.data:[];
+  historyRows.forEach(h=>{
+    const pid=String(h.patient_id||'');
+    if(!pid||!patients[pid])return;
+    if(!Array.isArray(patients[pid].history))patients[pid].history=[];
+    patients[pid].history.push({date:h.booking_date,time_slot:normalizeTime(h.time_slot),therapist:h.therapist||''});
+  });
+  Object.values(patients).forEach(p=>{
+    if(!Array.isArray(p.history))p.history=[];
+    p.history.sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.time_slot||'').localeCompare(String(a.time_slot||'')));
   });
 
   // bookings
