@@ -4804,7 +4804,7 @@ async function renderActuals(){
 
     let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
       <tr class="section"><td colspan="${months.length+2}">基本実績</td></tr>
-      ${arow('営業日数',work.map(afmt).concat(afmt(work.reduce((s,v)=>s+v,0)/12)))}
+      ${arow('営業日数',work.map(v=>afmt(v/2)).concat(afmt(work.reduce((s,v)=>s+v,0)/12)))}
       ${arow('実際取得単位数',actual.map(afmt).concat(afmt(tAct/12)),'total')}
       ${arow('平均取得単位数',avg.map(afmt).concat(afmt(allAvg)),'average')}
       ${arow('キャンセル単位数',cancel.map(afmt).concat(afmt(tCan/12)))}
