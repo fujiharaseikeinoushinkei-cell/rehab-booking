@@ -447,6 +447,11 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <button class="btn btn-primary btn-sm" onclick="openAddPatient()">＋ 新規登録</button>
       <button class="btn btn-sm" onclick="openExcelImport()">📋 CSV取込</button>
       <button class="btn btn-sm btn-green" onclick="exportCSV()">⬇ CSV出力</button>
+      <select id="patient-sort" class="btn btn-sm" onchange="patientListSort=this.value;renderPatientList()" style="min-width:120px">
+        <option value="kana">アイウエオ順</option>
+        <option value="id">ID順</option>
+        <option value="deadline">期限順</option>
+      </select>
     </div>
     <div id="patient-list"></div>
   </div>
@@ -3661,14 +3666,22 @@ function renderDeadline(){
 }
 
 // ---- PATIENT MANAGEMENT ----
+let patientListSort='kana';
 function renderPatientList(){
   const el=document.getElementById('patient-list');
   if(!Object.keys(patients).some(id=>!isArchivedPatient(id))){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
 
-  // 担当者ごとに分けてあいうえお順でソート
-  const sortByKana=(a,b)=>{
-    const ka=patients[a].kana||patients[a].name;
-    const kb=patients[b].kana||patients[b].name;
+  const sortByPatient=(a,b)=>{
+    const pa=patients[a],pb=patients[b];
+    if(patientListSort==='id') return String(a).localeCompare(String(b),'ja',{numeric:true,sensitivity:'base'});
+    if(patientListSort==='deadline'){
+      const da=pa.deadline?new Date(pa.deadline).getTime():Infinity;
+      const db=pb.deadline?new Date(pb.deadline).getTime():Infinity;
+      if(da!==db)return da-db;
+      return String(a).localeCompare(String(b),'ja',{numeric:true,sensitivity:'base'});
+    }
+    const ka=pa.kana||pa.name;
+    const kb=pb.kana||pb.name;
     return ka.localeCompare(kb,'ja');
   };
 
@@ -3691,7 +3704,7 @@ function renderPatientList(){
   let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">`;
 
   staffList.forEach(s=>{
-    const ids=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&patients[id].therapist===s.id).sort(sortByKana);
+    const ids=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&patients[id].therapist===s.id).sort(sortByPatient);
     const c=getStaffColor(s.id);
     html+=`<div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;background:${c.bg};border-radius:8px">
@@ -4760,7 +4773,8 @@ async function renderActuals(){
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
 
-    const avg=actual.map((v,i)=>work[i]?v/work[i]/Math.max(1,staffList.length):0);
+    // 基本実績の平均取得単位数＝各PTの平均取得単位数を足してPT人数で割る。
+    const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+(a[i]||0),0)/staffList.length:0);
 
     // 担当者別は、その月に「実施済」になった患者のユニーク人数。
     const staffPatients=staffList.map(t=>rows.map(r=>actualsUnique(r,b=>b.status==='done'&&b.therapist===t.id)));
