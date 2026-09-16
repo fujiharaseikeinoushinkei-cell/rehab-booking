@@ -4828,9 +4828,6 @@ async function renderActuals(){
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
 
-    // 基本実績の平均取得単位数＝各PTの平均取得単位数を足してPT人数で割る。
-    const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+(a[i]||0),0)/staffList.length:0);
-
     // 担当者別は、その月に「実施済」になった患者のユニーク人数。
     const staffPatients=staffList.map(t=>rows.map(r=>actualsUnique(r,b=>b.status==='done'&&b.therapist===t.id)));
     // 運動器患者数は、担当者別患者数の総和。
@@ -4868,6 +4865,8 @@ async function renderActuals(){
     // 担当者別平均取得単位数＝担当者別取得単位数÷担当者別出勤日数。
     const staffDays=staffList.map(t=>months.map(m=>actualsPtDays(m.ym,t.id)));
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=staffDays[ti][i];return d?v/d:0;}));
+    // 基本実績の平均取得単位数＝各PTの平均取得単位数を足してPT人数で割る。
+    const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+(a[i]||0),0)/staffList.length:0);
     const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
     // 基本実績の平均取得単位数＝全担当者の取得単位数総和÷全担当者の出勤日数総和。
     const totalStaffDays=work.reduce((s,v)=>s+v,0);
