@@ -849,6 +849,20 @@ function formatPatientDeadline(deadline){
   if(Number.isNaN(d.getTime()))return '～未設定';
   return `～${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
 }
+// 患者管理用の算定開始日～リハ期限表示
+function formatPatientBillingPeriod(startDate,deadline){
+  let start='未設定';
+  if(startDate){
+    const s=new Date(startDate);
+    if(!Number.isNaN(s.getTime()))start=`${s.getFullYear()}/${s.getMonth()+1}/${s.getDate()}`;
+  }
+  let end='未設定';
+  if(deadline){
+    const d=deadline instanceof Date?deadline:new Date(deadline);
+    if(!Number.isNaN(d.getTime()))end=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+  }
+  return `${start}～${end}`;
+}
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
@@ -1201,7 +1215,7 @@ async function loadAllData(){
   // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
 
-  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndPatientRes,ndAdminRes,spRes]=await Promise.all([
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
     sb.from('system_settings').select('*'),
     sb.from('slot_definitions').select('*').eq('is_active',true),
     sb.from('holidays').select('holiday_date,label,period'),
@@ -1209,17 +1223,8 @@ async function loadAllData(){
     sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
     sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
-    // 患者からの予約変更を管理者操作より先に十分な件数取得する。
-    // 管理者操作が多くても、患者からの予約変更が最新40件に埋もれないようにする。
     sb.from('notifications').select('id,message,created_at,operator')
-      .eq('dismissed',false)
-      .neq('operator','admin').neq('operator','system')
-      .or('message.ilike.%に予約%,message.ilike.%キャンセル%')
-      .order('created_at',{ascending:false}).limit(1000),
-    // 管理者による操作は別取得し、画面上の最大表示10件を確実にする。
-    sb.from('notifications').select('id,message,created_at,operator')
-      .eq('dismissed',false).eq('operator','admin')
-      .order('created_at',{ascending:false}).limit(10),
+      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
     sb.from('special_business_days').select('*'),
   ]);
 
@@ -1309,6 +1314,7 @@ async function loadAllData(){
       disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
       deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
       rehabStartDate:rehabStartDates[String(p.id)]||'',
+      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
   });
@@ -1328,12 +1334,7 @@ async function loadAllData(){
   });
 
   // notifications
-  // 患者からの予約変更を優先取得し、管理者操作は別枠で取得する。
-  const patientNotificationRows=(ndPatientRes.data||[]);
-  const adminNotificationRows=(ndAdminRes.data||[]);
-  notifications=[...patientNotificationRows,...adminNotificationRows]
-    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))
-    .map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
+  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
 
   // 臨時営業日
   specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot)})):[];
@@ -3127,7 +3128,7 @@ function getCurrentActor(){
   if(currentActorType === 'patient' && currentActorPatientId) return currentActorPatientId;
   return null;
 }
-let notifShowCount={patient:5,admin:10};
+let notifShowCount={patient:5,admin:5};
 
 // ---- 患者からの予約変更・担当者承認 ----
 // DBの既存 notifications テーブルだけで完結させるため、承認内容をmessage末尾に保存する。
@@ -3166,33 +3167,15 @@ function isApprovedNotification(n){
   return String(n?.text||'').includes(STAFF_REPLY_MARK);
 }
 
-function getDismissedAdminPatientChangeIds(){
-  try{return new Set(JSON.parse(localStorage.getItem('adminPatientChangeDismissed')||'[]').map(String));}
-  catch(e){return new Set();}
-}
-function setDismissedAdminPatientChange(id){
-  const ids=getDismissedAdminPatientChangeIds();
-  ids.add(String(id));
-  try{localStorage.setItem('adminPatientChangeDismissed',JSON.stringify(Array.from(ids)));return true;}
-  catch(e){console.warn('患者予約変更のお知らせ削除状態を保存できません',e);return false;}
-}
-function dismissPatientBookingChange(id){
-  const n=notifications.find(x=>Number(x.id)===Number(id));
-  if(!n || !isPatientBookingChange(n))return;
-  setDismissedAdminPatientChange(id);
-  notifications=notifications.filter(x=>String(x.id)!==String(id));
-  renderNotifications();
-}
-
 function renderNotifications(){
   const el=document.getElementById('notif-list');
   const empty=document.getElementById('notif-empty');
   const cnt=document.getElementById('notif-cnt');
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
-  const dismissedAdminPatientChanges=getDismissedAdminPatientChangeIds();
-  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n) && !dismissedAdminPatientChanges.has(String(n.id)));
-  const adminNotifs=notifications.filter(n=>n.operator==='admin').slice(0,10);
+  const patientIds = new Set(Object.keys(patients||{}).map(String));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
+  const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
   cnt.style.display=total?'inline-flex':'none';
@@ -3208,8 +3191,8 @@ function renderNotifications(){
       let action='';
       if(type==='patient' && change){
         action=approved
-          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissPatientBookingChange(${n.id})">×</button></div>`
-          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissPatientBookingChange(${n.id})">✓</div></div>`;
+          ? `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><div class="notif-approved">承認済</div><button class="notif-delete" title="通知を削除" onclick="dismissNotif(${n.id})">×</button></div>`
+          : `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><button class="notif-approve" onclick="approvePatientChange(${n.id})">承認</button><div class="notif-dismiss" title="通知を削除" onclick="dismissNotif(${n.id})">✓</div></div>`;
       }else if(type==='admin'){
         action=`<div class="notif-dismiss" onclick="dismissNotif(${n.id})">✓</div>`;
       }
@@ -3219,9 +3202,8 @@ function renderNotifications(){
         ${action}
       </div>`;
     }).join('');
-    const maxShow=type==='admin'?10:20;
-    const remaining=Math.min(list.length-showCount,maxShow-showCount);
-    if(type==='patient' && remaining>0){
+    const remaining=Math.min(list.length-showCount,20-showCount);
+    if(remaining>0){
       html+=`<div style="text-align:center;padding:8px 0">
         <button class="btn btn-sm" onclick="notifShowMore('${type}')">さらに表示（残り${remaining}件）</button>
       </div>`;
@@ -3238,7 +3220,7 @@ function renderNotifications(){
 }
 
 function notifShowMore(type){
-  notifShowCount[type]=Math.min(notifShowCount[type]+5,type==='admin'?10:20);
+  notifShowCount[type]=Math.min(notifShowCount[type]+5,20);
   renderNotifications();
 }
 
@@ -3253,10 +3235,6 @@ async function approvePatientChange(id){
   const {data,error}=await sb.from('notifications').update({message:updatedMessage}).eq('id',id).select().single();
   if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
   n.text=data?.message||updatedMessage;
-  // 承認済みの患者予約変更は管理者のお知らせ画面から消す。
-  // DBのdismissedは変更しないため、患者側の「担当者より」は保持する。
-  setDismissedAdminPatientChange(id);
-  notifications=notifications.filter(x=>String(x.id)!==String(id));
   // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
   await dbLog('admin','approve_patient_change',`${n.operator}：${reply}`);
   renderNotifications();
@@ -3663,10 +3641,12 @@ function renderPatientList(){
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
         <span style="font-weight:600;font-size:14px;flex:1;cursor:pointer" onclick="openEditPatient('${id}')">${p.name}</span>
       </div>
-      <div style="font-size:11px;color:#8E8E93;margin-bottom:6px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientDeadline(p.deadline)}</div>
-      <div style="display:flex;gap:4px">
-        <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
-        <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="font-size:11px;color:#8E8E93;flex:1">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientBillingPeriod(p.rehabBillingStartDate,p.deadline)}</div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
+          <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
+        </div>
       </div>
     </div>`;
   }
