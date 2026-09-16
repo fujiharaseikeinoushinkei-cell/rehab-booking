@@ -4515,38 +4515,8 @@ async function loadActualsData(fy){
 }
 function actualsSum(rows,fn){return rows.reduce((s,b)=>s+(fn(b)?Number(b.unit||2):0),0);}
 function actualsUnique(rows,fn){return new Set(rows.filter(fn).map(b=>b.patient_id).filter(Boolean)).size;}
-// 実績表の営業日数：通常営業は全日=1.0、午前/午後のみ=0.5、休診=0。
-// 臨時営業日は同一日の登録時間を合計し、200分未満=0、200～399分=0.5、400分以上=1.0。
-function actualsBusinessDayValue(ds,th=null){
-  const special=specialDays.filter(s=>s.special_date===ds&&(!th||s.therapist===th));
-  if(special.length){
-    const totalMin=special.reduce((sum,s)=>{
-      const parts=String(s.time_slot||'').trim().split('-').map(v=>v.trim());
-      if(parts.length<2)return sum;
-      const start=timeMins(parts[0]),end=timeMins(parts[1]);
-      return end>start?sum+(end-start):sum;
-    },0);
-    return totalMin>=400?1.0:(totalMin>=200?0.5:0);
-  }
-  if(isHoliday(ds))return 0;
-  const status=getBusinessStatus(ds);
-  if(status==='full')return 1.0;
-  if(status==='am'||status==='pm')return 0.5;
-  return 0;
-}
-function actualsBusinessDays(ym){return monthDays(ym).reduce((sum,ds)=>sum+actualsBusinessDayValue(ds),0);}
-function actualsPtDays(ym,th){
-  return monthDays(ym).reduce((sum,ds)=>{
-    const base=actualsBusinessDayValue(ds,th);
-    if(base<=0)return sum;
-    const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
-    if(!lv)return sum+base;
-    const half=lv.half_type||'full';
-    if(half==='full')return sum;
-    if(half==='am'||half==='pm')return sum+Math.max(0,base-0.5);
-    return sum+base;
-  },0);
-}
+function actualsBusinessDays(ym){return monthDays(ym).filter(ds=>!isDayOff(ds)).length;}
+function actualsPtDays(ym,th){return monthDays(ym).filter(ds=>!isTherapistOff(ds,th)).length;}
 function actualsCapacity(ym,th){let n=0;monthDays(ym).forEach(ds=>{if(isTherapistOff(ds,th))return;timesForDate(ds,th).forEach(t=>{if(isSlotAvailable(ds,t,th))n+=2;});});return n;}
 // 予約空き数：実際に設定されている「空き枠」を1枠=2単位として集計。
 // 予約なし／キャンセル／振替済みは空き、予約・実施済み・来なかったは埋まりとして扱う。
@@ -4616,11 +4586,7 @@ async function renderActuals(){
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
 
-    // 基本実績の平均取得単位数は、PTごとの平均取得単位数を算術平均する。
-    const avg=months.map((m,i)=>{
-      const vals=staffList.map((t,ti)=>tav[ti][i]).filter(v=>Number.isFinite(v));
-      return vals.length?vals.reduce((s,v)=>s+v,0)/vals.length:0;
-    });
+    const avg=actual.map((v,i)=>work[i]?v/work[i]/Math.max(1,staffList.length):0);
 
     // 担当者別は、その月に「実施済」になった患者のユニーク人数。
     const staffPatients=staffList.map(t=>rows.map(r=>actualsUnique(r,b=>b.status==='done'&&b.therapist===t.id)));
@@ -4658,11 +4624,7 @@ async function renderActuals(){
     const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtDays(months[i].ym,t.id);return d?v/d:0;}));
     const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
-    const staffAnnualAvgs=staffList.map((t,i)=>{
-      const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);
-      return days?total(ta[i])/days:null;
-    }).filter(v=>v!=null);
-    const allAvg=staffAnnualAvgs.length?staffAnnualAvgs.reduce((s,v)=>s+v,0)/staffAnnualAvgs.length:0;
+    const allAvg=work.reduce((s,v)=>s+v,0)?tAct/work.reduce((s,v)=>s+v,0)/Math.max(1,staffList.length):0;
 
     let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
       <tr class="section"><td colspan="${months.length+2}">基本実績</td></tr>
@@ -4675,8 +4637,6 @@ async function renderActuals(){
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
       ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
-      ${staffList.map((t,i)=>arow(`${t.name} 取得単位数`,ta[i].map(afmt).concat(afmt(total(ta[i])/12)),'total')).join('')}
-      ${staffList.map(t=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 出勤日数`,months.map(m=>afmt(actualsPtDays(m.ym,t.id))).concat(afmt(days/12)));}).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
       ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
