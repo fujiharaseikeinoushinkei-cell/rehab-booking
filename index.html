@@ -4829,6 +4829,7 @@ async function renderActuals(){
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
 
     // 基本実績の平均取得単位数＝各PTの平均取得単位数を足してPT人数で割る。
+    const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+(a[i]||0),0)/staffList.length:0);
 
     // 担当者別は、その月に「実施済」になった患者のユニーク人数。
     const staffPatients=staffList.map(t=>rows.map(r=>actualsUnique(r,b=>b.status==='done'&&b.therapist===t.id)));
@@ -4867,7 +4868,6 @@ async function renderActuals(){
     // 担当者別平均取得単位数＝担当者別取得単位数÷担当者別出勤日数。
     const staffDays=staffList.map(t=>months.map(m=>actualsPtDays(m.ym,t.id)));
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=staffDays[ti][i];return d?v/d:0;}));
-    const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+(a[i]||0),0)/staffList.length:0);
     const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
     // 基本実績の平均取得単位数＝全担当者の取得単位数総和÷全担当者の出勤日数総和。
     const totalStaffDays=work.reduce((s,v)=>s+v,0);
@@ -4882,10 +4882,10 @@ async function renderActuals(){
       ${arow('キャンセル率',cancelRate.map(apct).concat(apct(yearRate)))}
       ${arow('予約空き数',open.map(afmt).concat(afmt(total(open)/12)))}
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
-      ${staffList.map((t,i)=>arow(`${t.name} 取得単位数`,ta[i].map(afmt).concat(afmt(total(ta[i])/12)),'total')).join('')}
-      ${staffList.map((t,i)=>arow(`${t.name} 出勤日数`,staffDays[i].map(afmt).concat(afmt(total(staffDays[i])/12)))).join('')}
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
       ${staffList.map((t,i)=>arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(total(ta[i])/Math.max(1,total(staffDays[i])))),'average')).join('')}
+      ${staffList.map((t,i)=>arow(`${t.name} 取得単位数`,ta[i].map(afmt).concat(afmt(total(ta[i])/12)),'total')).join('')}
+      ${staffList.map((t,i)=>arow(`${t.name} 出勤日数`,staffDays[i].map(afmt).concat(afmt(total(staffDays[i])/12)))).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
       ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
