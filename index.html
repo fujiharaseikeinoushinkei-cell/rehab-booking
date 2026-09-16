@@ -1189,6 +1189,8 @@ let archivedPatientIds = new Set();
 let rehabStartDates = {};
 // 患者ごとの介護保険利用有無（患者管理のチェック状態を保持）
 let careInsurancePatients = {};
+// 患者ごとの複数診断名（1番目の診断名は従来のpatients.diseaseにも保持）
+let patientDiagnoses = {};
 // 患者ごとのリハビリ算定開始日（system_settingsで保持）
 let rehabBillingStartDates = {};
 async function saveRehabBillingStartDates(){
@@ -1205,6 +1207,42 @@ async function saveRehabStartDates(){
 }
 async function saveCareInsurancePatients(){
   await dbSaveSetting('patient_care_insurance', JSON.stringify(careInsurancePatients));
+}
+async function savePatientDiagnoses(){
+  await dbSaveSetting('patient_diagnoses', JSON.stringify(patientDiagnoses));
+}
+function getPatientDiagnoses(id,p){
+  const list=Array.isArray(patientDiagnoses[String(id)])?patientDiagnoses[String(id)].filter(v=>String(v||'').trim()):[];
+  if(list.length)return list;
+  return p&&String(p.disease||'').trim()?[String(p.disease).trim()]:[''];
+}
+function setPatientDiagnosesInputs(prefix,list){
+  const wrap=document.getElementById(prefix+'-diagnoses');
+  if(!wrap)return;
+  const vals=Array.isArray(list)&&list.length?list:[''];
+  wrap.innerHTML=vals.map((v,i)=>`<div style="display:flex;gap:6px;margin-bottom:6px">
+    <input type="text" class="${prefix}-diagnosis" value="${escapeHtml(v||'')}" placeholder="診断名${i+1}" style="flex:1">
+    ${i>0?`<button type="button" class="btn btn-sm" onclick="removePatientDiagnosis('${prefix}',${i})">削除</button>`:''}
+  </div>`).join('');
+}
+function addPatientDiagnosis(prefix){
+  const wrap=document.getElementById(prefix+'-diagnoses');
+  if(!wrap)return;
+  const vals=[...wrap.querySelectorAll('.'+prefix+'-diagnosis')].map(el=>el.value);
+  vals.push('');
+  setPatientDiagnosesInputs(prefix,vals);
+}
+function removePatientDiagnosis(prefix,index){
+  const wrap=document.getElementById(prefix+'-diagnoses');
+  if(!wrap)return;
+  const vals=[...wrap.querySelectorAll('.'+prefix+'-diagnosis')].map(el=>el.value);
+  vals.splice(index,1);
+  setPatientDiagnosesInputs(prefix,vals);
+}
+function getPatientDiagnosesInputs(prefix){
+  const wrap=document.getElementById(prefix+'-diagnoses');
+  if(!wrap)return [];
+  return [...wrap.querySelectorAll('.'+prefix+'-diagnosis')].map(el=>el.value.trim()).filter(Boolean);
 }
 function isArchivedPatient(id){ return archivedPatientIds.has(String(id)); }
 async function saveArchivedPatientIds(){
@@ -1299,6 +1337,12 @@ async function loadAllData(){
         careInsurancePatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
       }catch(e){ careInsurancePatients={}; }
     }
+    if(r.key==='patient_diagnoses'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        patientDiagnoses=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ patientDiagnoses={}; }
+    }
     if(r.key==='patient_rehab_billing_start_dates'){
       try{
         const parsed=JSON.parse(r.value||'{}');
@@ -1343,6 +1387,9 @@ async function loadAllData(){
       rehabStartDate:rehabStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
       note:p.note||'',history:[]};
+    if(!Array.isArray(patientDiagnoses[String(p.id)]) || !patientDiagnoses[String(p.id)].length){
+      patientDiagnoses[String(p.id)]=p.disease?[p.disease]:[''];
+    }
   });
 
   // bookings
@@ -3733,7 +3780,7 @@ function openAddPatient(){
     <div class="input-group"><label>フリガナ</label><input type="text" id="np-kana" placeholder="ヤマダ タロウ"></div>
     <div class="input-group"><label>生年月日</label><input type="date" id="np-dob"></div>
     <div class="input-group"><label>性別</label><select id="np-gender"><option>男</option><option>女</option></select></div>
-    <div class="input-group"><label>疾患名</label><input type="text" id="np-disease" placeholder="変形性膝関節症"></div>
+    <div class="input-group"><label>診断名</label><div id="np-diagnoses"></div><button type="button" class="btn btn-sm" onclick="addPatientDiagnosis('np')">＋ 診断名を追加</button></div>
     <div class="input-group"><label>担当セラピスト</label><select id="np-th">${staffList.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="np-rehab-start"></div>
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="np-rehab-billing-start" onchange="autoCalcNewPatientDeadline()"></div>
@@ -3742,6 +3789,7 @@ function openAddPatient(){
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`);
+  setPatientDiagnosesInputs('np',['']);
 }
 
 function autoCalcNewPatientDeadline(){
@@ -3778,7 +3826,7 @@ function loadReRegisterPatient(val){
   setValue('np-kana',p.kana||'');
   setValue('np-dob',p.dob||'');
   setValue('np-gender',p.gender||'男');
-  setValue('np-disease',p.disease||'');
+  setPatientDiagnosesInputs('np',getPatientDiagnoses(id,p));
   setValue('np-th',p.therapist||staffList[0]?.id||'');
   setValue('np-rehab-start',p.rehabStartDate||rehabStartDates[String(id)]||'');
   setValue('np-rehab-billing-start',p.rehabBillingStartDate||rehabBillingStartDates[String(id)]||'');
@@ -3798,8 +3846,9 @@ async function saveNewPatient(){
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
+  const diagnoses=getPatientDiagnosesInputs('np');
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
-    gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
+    gender:document.getElementById('np-gender').value,disease:diagnoses[0]||'',
     therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?parseLocalDate(dl):parseLocalDate('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
@@ -3813,9 +3862,11 @@ async function saveNewPatient(){
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
+  patientDiagnoses[String(id)]=diagnoses.length?diagnoses:[''];
   await saveRehabStartDates();
   await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
+  await savePatientDiagnoses();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast(`${name} さんを登録しました`,'#34C759');
@@ -3828,7 +3879,7 @@ function openEditPatient(id){
     <div class="input-group"><label>フリガナ</label><input type="text" id="ep-kana" value="${p.kana||''}"></div>
     <div class="input-group"><label>生年月日</label><input type="date" id="ep-dob" value="${p.dob||''}"></div>
     <div class="input-group"><label>性別</label><select id="ep-gender"><option ${p.gender==='男'?'selected':''}>男</option><option ${p.gender==='女'?'selected':''}>女</option></select></div>
-    <div class="input-group"><label>疾患名</label><input type="text" id="ep-disease" value="${p.disease}"></div>
+    <div class="input-group"><label>診断名</label><div id="ep-diagnoses"></div><button type="button" class="btn btn-sm" onclick="addPatientDiagnosis('ep')">＋ 診断名を追加</button></div>
     <div class="input-group"><label>担当</label><select id="ep-th">${staffList.map(s=>`<option value="${s.id}" ${p.therapist===s.id?'selected':''}>${s.name}</option>`).join('')}</select></div>
     <div class="input-group"><label>リハビリ開始日</label><input type="date" id="ep-rehab-start" value="${p.rehabStartDate||''}"></div>
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="ep-rehab-billing-start" value="${p.rehabBillingStartDate||''}" onchange="autoCalcEditPatientDeadline()"></div>
@@ -3839,6 +3890,7 @@ function openEditPatient(id){
       <button class="btn btn-block" onclick="closeModal()">キャンセル</button>
       <button class="btn btn-primary btn-block" id="ep-submit" onclick="saveEditPatient('${id}')">保存</button>
     </div>`);
+  setPatientDiagnosesInputs('ep',getPatientDiagnoses(id,p));
 }
 function autoCalcEditPatientDeadline(){
   const start=document.getElementById('ep-rehab-billing-start')?.value||'';
@@ -3848,9 +3900,10 @@ function autoCalcEditPatientDeadline(){
 
 async function saveEditPatient(id){
   const p=patients[id];
+  const diagnoses=getPatientDiagnosesInputs('ep');
   const updated={name:document.getElementById('ep-name').value.trim()||p.name,kana:document.getElementById('ep-kana').value,
     dob:document.getElementById('ep-dob').value,gender:document.getElementById('ep-gender').value,
-    disease:document.getElementById('ep-disease').value,therapist:document.getElementById('ep-th').value,
+    disease:diagnoses[0]||'',therapist:document.getElementById('ep-th').value,
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').value==='有',
@@ -3864,9 +3917,11 @@ async function saveEditPatient(id){
   rehabStartDates[String(id)]=updated.rehabStartDate||'';
   rehabBillingStartDates[String(id)]=updated.rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=!!updated.careInsurance;
+  patientDiagnoses[String(id)]=diagnoses.length?diagnoses:[''];
   await saveRehabStartDates();
   await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
+  await savePatientDiagnoses();
   await dbLog('admin','edit_patient',`${updated.name}（${id}）を編集`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast('保存しました','#34C759');
