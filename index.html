@@ -1211,31 +1211,11 @@ async function saveArchivedPatientIds(){
 }
 
 // ---- LOAD ----
-async function fetchActiveNotificationsPaged(){
-  const size=1000;
-  let start=0;
-  const all=[];
-  while(true){
-    const {data,error}=await sb.from('notifications')
-      .select('id,message,created_at,operator')
-      .eq('dismissed',false)
-      .order('created_at',{ascending:false})
-      .range(start,start+size-1);
-    if(error)throw error;
-    const rows=data||[];
-    all.push(...rows);
-    if(rows.length<size)break;
-    start+=size;
-  }
-  return {data:all,error:null};
-}
-
 async function loadAllData(){
   // 並列でまとめて取得（速度改善）
   const from=dateStr(addDays(TODAY,-7)),to=dateStr(addDays(TODAY,60));
-  const notifPromise=fetchActiveNotificationsPaged();
 
-  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,spRes]=await Promise.all([
+  const [srRes,sdRes,hdRes,ldRes,pdRes,brRes,ndRes,spRes]=await Promise.all([
     sb.from('system_settings').select('*'),
     sb.from('slot_definitions').select('*').eq('is_active',true),
     sb.from('holidays').select('holiday_date,label,period'),
@@ -1243,9 +1223,10 @@ async function loadAllData(){
     sb.from('patients').select('id,name,kana,dob,gender,disease,therapist,deadline,note'),
     sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
+    sb.from('notifications').select('id,message,created_at,operator')
+      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
     sb.from('special_business_days').select('*'),
   ]);
-  const ndRes=await notifPromise;
 
   // settings
   (srRes.data||[]).forEach(r=>{
@@ -1353,7 +1334,7 @@ async function loadAllData(){
   });
 
   // notifications
-  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
+  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,createdAt:n.created_at,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
 
   // 臨時営業日
   specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot)})):[];
@@ -1573,7 +1554,7 @@ async function dbAddNotification(text, operator=null){
     .insert({message:text,operator:actor})
     .select().single();
   if(error){ console.error('通知保存失敗:',error); return false; }
-  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
+  notifications.unshift({id:data.id,text:data.message,createdAt:data.created_at||new Date().toISOString(),time:fmtTime(data.created_at||new Date().toISOString()),operator:data.operator});
   await sb.from('operation_logs').insert({operator:actor,action:'notify',detail:text});
   if(document.getElementById('notif-list')) renderNotifications();
   return true;
@@ -1599,7 +1580,7 @@ async function dbAddPatientMessage(patientId,text){
     console.error('患者へのメッセージ保存失敗:',error);
     return {ok:false,reason:'メッセージの送信に失敗しました'};
   }
-  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
+  notifications.unshift({id:data.id,text:data.message,createdAt:data.created_at||new Date().toISOString(),time:fmtTime(data.created_at||new Date().toISOString()),operator:data.operator});
   await dbLog('admin','patient_message',`${pid}：${msg}`);
   return {ok:true};
 }
@@ -3185,6 +3166,19 @@ function getStaffReplyText(n){
 function isApprovedNotification(n){
   return String(n?.text||'').includes(STAFF_REPLY_MARK);
 }
+function getPatientBookingChangeType(n){
+  const msg=getOriginalNotificationText(n);
+  if(msg.includes('キャンセル'))return 'キャンセル';
+  if(msg.includes('に予約'))return '予約';
+  return '予約変更';
+}
+function sortNotificationsByJST(list){
+  return [...list].sort((a,b)=>{
+    const ta=Date.parse(a.createdAt||'')||0;
+    const tb=Date.parse(b.createdAt||'')||0;
+    return tb-ta;
+  });
+}
 
 function renderNotifications(){
   const el=document.getElementById('notif-list');
@@ -3192,9 +3186,9 @@ function renderNotifications(){
   const cnt=document.getElementById('notif-cnt');
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
-  // 患者からの予約変更を最優先で全件表示。管理者操作は最大10件。
-  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
-  const adminNotifs=notifications.filter(n=>n.operator==='admin');
+  const patientIds = new Set(Object.keys(patients||{}).map(String));
+  const patientNotifs=sortNotificationsByJST(notifications.filter(n=>isPatientBookingChange(n)));
+  const adminNotifs=sortNotificationsByJST(notifications.filter(n=>n.operator==='admin'));
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
   cnt.style.display=total?'inline-flex':'none';
@@ -3202,11 +3196,13 @@ function renderNotifications(){
 
   function buildList(list,type,showCount){
     if(!list.length)return`<div style="font-size:12px;color:#C7C7CC;padding:8px 0;text-align:center">なし</div>`;
-    const showing=showCount===null?list:list.slice(0,showCount);
-    return showing.map(n=>{
+    const showing=list.slice(0,showCount);
+    let html=showing.map(n=>{
       const approved=isApprovedNotification(n);
       const change=isPatientBookingChange(n);
       const displayText=getOriginalNotificationText(n);
+      const changeLabel=type==='patient' ? getPatientBookingChangeType(n) : '';
+      const displayTime=n.time||fmtTime(n.createdAt);
       let action='';
       if(type==='patient' && change){
         action=approved
@@ -3217,22 +3213,29 @@ function renderNotifications(){
       }
       return `<div class="notif-item" id="ni-${n.id}">
         <div class="notif-dot"></div>
-        <div class="notif-body">${displayText}<div class="notif-time">${n.time}</div></div>
+        <div class="notif-body">${type==='patient'?`【${changeLabel}】`:''}${displayText}<div class="notif-time">${displayTime}</div></div>
         ${action}
       </div>`;
     }).join('');
+    const remaining=Math.min(list.length-showCount,20-showCount);
+    if(remaining>0){
+      html+=`<div style="text-align:center;padding:8px 0">
+        <button class="btn btn-sm" onclick="notifShowMore('${type}')">さらに表示（残り${remaining}件）</button>
+      </div>`;
+    }
+    return html;
   }
 
   el.innerHTML=`
     <div style="font-size:12px;font-weight:600;color:#007AFF;margin-bottom:6px">👤 患者からの予約変更</div>
-    <div id="notif-patient">${buildList(patientNotifs,'patient',null)}</div>
+    <div id="notif-patient">${buildList(patientNotifs,'patient',notifShowCount.patient)}</div>
     <hr style="border:none;border-top:1.5px solid #E5E5EA;margin:12px 0">
     <div style="font-size:12px;font-weight:600;color:#5E35B1;margin-bottom:6px">🛡 管理者による操作</div>
-    <div id="notif-admin">${buildList(adminNotifs,'admin',10)}</div>`;
+    <div id="notif-admin">${buildList(adminNotifs,'admin',notifShowCount.admin)}</div>`;
 }
 
 function notifShowMore(type){
-  // 患者通知は全件、管理者操作は最大10件を固定表示。
+  notifShowCount[type]=Math.min(notifShowCount[type]+5,20);
   renderNotifications();
 }
 
