@@ -1334,7 +1334,7 @@ async function loadAllData(){
   });
 
   // notifications
-  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,createdAt:n.created_at,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
+  notifications=(ndRes.data||[]).map(n=>({id:n.id,text:n.message,time:fmtTime(n.created_at),operator:n.operator||'patient'}));
 
   // 臨時営業日
   specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeTime(s.time_slot)})):[];
@@ -1554,7 +1554,7 @@ async function dbAddNotification(text, operator=null){
     .insert({message:text,operator:actor})
     .select().single();
   if(error){ console.error('通知保存失敗:',error); return false; }
-  notifications.unshift({id:data.id,text:data.message,createdAt:data.created_at||new Date().toISOString(),time:fmtTime(data.created_at||new Date().toISOString()),operator:data.operator});
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
   await sb.from('operation_logs').insert({operator:actor,action:'notify',detail:text});
   if(document.getElementById('notif-list')) renderNotifications();
   return true;
@@ -1580,7 +1580,7 @@ async function dbAddPatientMessage(patientId,text){
     console.error('患者へのメッセージ保存失敗:',error);
     return {ok:false,reason:'メッセージの送信に失敗しました'};
   }
-  notifications.unshift({id:data.id,text:data.message,createdAt:data.created_at||new Date().toISOString(),time:fmtTime(data.created_at||new Date().toISOString()),operator:data.operator});
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
   await dbLog('admin','patient_message',`${pid}：${msg}`);
   return {ok:true};
 }
@@ -3166,19 +3166,6 @@ function getStaffReplyText(n){
 function isApprovedNotification(n){
   return String(n?.text||'').includes(STAFF_REPLY_MARK);
 }
-function getPatientBookingChangeType(n){
-  const msg=getOriginalNotificationText(n);
-  if(msg.includes('キャンセル'))return 'キャンセル';
-  if(msg.includes('に予約'))return '予約';
-  return '予約変更';
-}
-function sortNotificationsByJST(list){
-  return [...list].sort((a,b)=>{
-    const ta=Date.parse(a.createdAt||'')||0;
-    const tb=Date.parse(b.createdAt||'')||0;
-    return tb-ta;
-  });
-}
 
 function renderNotifications(){
   const el=document.getElementById('notif-list');
@@ -3187,8 +3174,8 @@ function renderNotifications(){
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
-  const patientNotifs=sortNotificationsByJST(notifications.filter(n=>isPatientBookingChange(n)));
-  const adminNotifs=sortNotificationsByJST(notifications.filter(n=>n.operator==='admin'));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
+  const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
   cnt.style.display=total?'inline-flex':'none';
@@ -3201,8 +3188,6 @@ function renderNotifications(){
       const approved=isApprovedNotification(n);
       const change=isPatientBookingChange(n);
       const displayText=getOriginalNotificationText(n);
-      const changeLabel=type==='patient' ? getPatientBookingChangeType(n) : '';
-      const displayTime=n.time||fmtTime(n.createdAt);
       let action='';
       if(type==='patient' && change){
         action=approved
@@ -3213,7 +3198,7 @@ function renderNotifications(){
       }
       return `<div class="notif-item" id="ni-${n.id}">
         <div class="notif-dot"></div>
-        <div class="notif-body">${type==='patient'?`【${changeLabel}】`:''}${displayText}<div class="notif-time">${displayTime}</div></div>
+        <div class="notif-body">${displayText}<div class="notif-time">${n.time}</div></div>
         ${action}
       </div>`;
     }).join('');
@@ -4530,8 +4515,37 @@ async function loadActualsData(fy){
 }
 function actualsSum(rows,fn){return rows.reduce((s,b)=>s+(fn(b)?Number(b.unit||2):0),0);}
 function actualsUnique(rows,fn){return new Set(rows.filter(fn).map(b=>b.patient_id).filter(Boolean)).size;}
-function actualsBusinessDays(ym){return monthDays(ym).filter(ds=>!isDayOff(ds)).length;}
-function actualsPtDays(ym,th){return monthDays(ym).filter(ds=>!isTherapistOff(ds,th)).length;}
+// 実績表の営業日数：終日=1.0、午前/午後のみ=0.5、休診=0。
+// 臨時営業日は同日の登録時間を合計し、200分未満=0、200～399分=0.5、400分以上=1.0。
+function actualsSpecialBusinessMinutes(ds,th=null){
+  const list=specialDays.filter(s=>s.special_date===ds && (th==null || s.therapist===th));
+  return list.reduce((sum,s)=>{
+    const raw=String(s.time_slot||'').trim();
+    const parts=raw.split('-').map(v=>v.trim());
+    if(parts.length<2)return sum;
+    const start=timeMins(parts[0]),end=timeMins(parts[1]);
+    return (Number.isFinite(start)&&Number.isFinite(end)&&end>start)?sum+(end-start):sum;
+  },0);
+}
+function actualsBusinessDayValue(ds,th=null){
+  const specialMin=actualsSpecialBusinessMinutes(ds,th);
+  if(specialMin>0)return specialMin<200?0:specialMin<400?0.5:1.0;
+  if(isHoliday(ds)||getBusinessStatus(ds)==='closed')return 0;
+  return getBusinessStatus(ds)==='full'?1.0:0.5;
+}
+function actualsBusinessDays(ym){return monthDays(ym).reduce((sum,ds)=>sum+actualsBusinessDayValue(ds),0);}
+function actualsPtDays(ym,th){
+  return monthDays(ym).reduce((sum,ds)=>{
+    const base=actualsBusinessDayValue(ds,th);
+    if(base<=0)return sum;
+    const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
+    if(!lv)return sum+base;
+    const half=(lv.half_type||'full');
+    if(half==='full')return sum;
+    if(half==='am'||half==='pm')return sum+Math.max(0,base-0.5);
+    return sum+base;
+  },0);
+}
 function actualsCapacity(ym,th){let n=0;monthDays(ym).forEach(ds=>{if(isTherapistOff(ds,th))return;timesForDate(ds,th).forEach(t=>{if(isSlotAvailable(ds,t,th))n+=2;});});return n;}
 // 予約空き数：実際に設定されている「空き枠」を1枠=2単位として集計。
 // 予約なし／キャンセル／振替済みは空き、予約・実施済み・来なかったは埋まりとして扱う。
@@ -4660,6 +4674,7 @@ async function renderActuals(){
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
       ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
+      ${staffList.map((t,i)=>arow(`${t.name} 営業日数`,months.map(m=>afmt(actualsPtDays(m.ym,t.id))).concat(afmt(months.reduce((s,m)=>s+actualsPtDays(m.ym,t.id),0)/12)))).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
       ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
