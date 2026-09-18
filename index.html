@@ -3253,7 +3253,7 @@ async function approvePatientChange(id){
   const reply=getStaffReplyText(n);
   const original=getOriginalNotificationText(n);
   const updatedMessage=`${original}${STAFF_REPLY_MARK}${reply}`;
-  const {data,error}=await sb.from('notifications').update({message:updatedMessage}).eq('id',id).select().single();
+  const {data,error}=await sb.from('notifications').update({message:updatedMessage,dismissed:false}).eq('id',id).select().single();
   if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
   n.text=data?.message||updatedMessage;
   // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
