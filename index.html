@@ -1224,7 +1224,7 @@ async function loadAllData(){
     sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to),
     sb.from('notifications').select('id,message,created_at,operator')
-      .eq('dismissed',false).order('created_at',{ascending:false}).limit(40),
+      .eq('dismissed',false).order('created_at',{ascending:false}).limit(1000),
     sb.from('special_business_days').select('*'),
   ]);
 
@@ -1556,6 +1556,27 @@ async function dbAddNotification(text, operator=null){
   if(error){ console.error('通知保存失敗:',error); return false; }
   notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
   await sb.from('operation_logs').insert({operator:actor,action:'notify',detail:text});
+  if(document.getElementById('notif-list')) renderNotifications();
+  return true;
+}
+
+// 患者IDログインからの予約変更通知は、渡された患者IDを通知主体として明示的に保存する。
+// 管理者操作の通知処理には手を加えない。
+async function dbAddPatientBookingNotification(patientId,text){
+  const pid=String(patientId||'').trim();
+  if(currentActorType!=='patient' || String(currentActorPatientId||'')!==pid){
+    console.error('患者予約変更通知保存中止：患者ログイン主体が一致しません',{pid,currentActorType,currentActorPatientId,text});
+    return false;
+  }
+  const {data,error}=await sb.from('notifications')
+    .insert({message:text,operator:pid,dismissed:false})
+    .select().single();
+  if(error){
+    console.error('患者予約変更通知保存失敗:',error);
+    return false;
+  }
+  notifications.unshift({id:data.id,text:data.message,time:'たった今',operator:data.operator});
+  await sb.from('operation_logs').insert({operator:pid,action:'notify',detail:text});
   if(document.getElementById('notif-list')) renderNotifications();
   return true;
 }
@@ -2764,7 +2785,7 @@ async function pubDoBook(fullDate,time,dateStr2,dayLabel){
   if(!r.ok){err.textContent=r.reason;err.style.display='block';
     await reloadBookings();renderPublicSlots();return;}
   const p=patients[pid];
-  await dbAddNotification(`${p.name}（${pid}）が ${dateStr2} ${dayLabel} ${normTime}（${getStaffName(pubTherapist)}）に予約`,pid);
+  await dbAddPatientBookingNotification(pid,`${p.name}（${pid}）が ${dateStr2} ${dayLabel} ${normTime}（${getStaffName(pubTherapist)}）に予約`);
   await reloadBookings();
   closeModal();renderPublicSlots();
   showToast(`${p.name} さんの予約を登録しました`,'#34C759');
@@ -3046,7 +3067,7 @@ async function doCancel(date,time,therapist){
   const ok=await dbCancelSlot(date,therapist,time);
   if(!ok){showToast('キャンセル処理に失敗しました');btn.disabled=false;btn.textContent='キャンセル確定';return;}
   const d=parseLocalDate(date);
-  await dbAddNotification(`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`,currentPid);
+  await dbAddPatientBookingNotification(currentPid,`${p.name}（${currentPid}）が ${d.getMonth()+1}/${d.getDate()} ${normalizeTime(time)} をキャンセル（理由：${reasonText}）`);
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
@@ -3083,7 +3104,7 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
-  await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,currentPid);
+  await dbAddPatientBookingNotification(currentPid,`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`);
   // DBから最新データを再読み込み
   await reloadBookings();
   closeModal();renderBanner();renderMyBook();renderReserve();
