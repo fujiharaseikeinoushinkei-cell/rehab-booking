@@ -447,6 +447,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <button class="btn btn-primary btn-sm" onclick="openAddPatient()">＋ 新規登録</button>
       <button class="btn btn-sm" onclick="openExcelImport()">📋 CSV取込</button>
       <button class="btn btn-sm btn-green" onclick="exportCSV()">⬇ CSV出力</button>
+      <button class="btn btn-sm" onclick="renderEndedPatients()">終了一覧</button>
     </div>
     <div id="patient-list"></div>
   </div>
@@ -1184,6 +1185,8 @@ function receptionClosedNoticeHTML(){
 
 // ---- 患者アーカイブ（実施済履歴を保持したまま患者管理から非表示にする） ----
 let archivedPatientIds = new Set();
+// 患者管理の「終了」対象。患者データ・実施済履歴は保持したまま終了一覧へ移動する。
+let endedPatientIds = new Set();
 // 患者ごとのリハビリ開始日（既存のpatientsテーブル構造を変更せずsystem_settingsで保持）
 let rehabStartDates = {};
 // 患者ごとの介護保険利用有無（患者管理のチェック状態を保持）
@@ -1209,6 +1212,10 @@ function isArchivedPatient(id){ return archivedPatientIds.has(String(id)); }
 async function saveArchivedPatientIds(){
   await dbSaveSetting('archived_patient_ids', JSON.stringify([...archivedPatientIds]));
 }
+async function saveEndedPatientIds(){
+  await dbSaveSetting('ended_patient_ids', JSON.stringify([...endedPatientIds]));
+}
+function isEndedPatient(id){ return endedPatientIds.has(String(id)); }
 
 // ---- LOAD ----
 async function loadAllData(){
@@ -1259,6 +1266,12 @@ async function loadAllData(){
         const parsed=JSON.parse(r.value||'[]');
         archivedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
       }catch(e){ archivedPatientIds=new Set(); }
+    }
+    if(r.key==='ended_patient_ids'){
+      try{
+        const parsed=JSON.parse(r.value||'[]');
+        endedPatientIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
+      }catch(e){ endedPatientIds=new Set(); }
     }
     if(r.key==='patient_rehab_start_dates'){
       try{
@@ -1719,7 +1732,9 @@ async function dbDeletePatient(id){
   // 患者レコード自体は削除せず、アーカイブ扱いにする。
   // これにより、直近5年以内の実施済 booking の patient_id → 患者名を保持できる。
   archivedPatientIds.add(String(id));
+  endedPatientIds.delete(String(id));
   await saveArchivedPatientIds();
+  await saveEndedPatientIds();
   return true;
 }
 
@@ -3665,7 +3680,7 @@ function renderDeadline(){
 // ---- PATIENT MANAGEMENT ----
 function renderPatientList(){
   const el=document.getElementById('patient-list');
-  if(!Object.keys(patients).some(id=>!isArchivedPatient(id))){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
+  if(!Object.keys(patients).some(id=>!isArchivedPatient(id)&&!isEndedPatient(id))){el.innerHTML='<div class="empty">患者が登録されていません</div>';return;}
 
   // 担当者ごとに分けてあいうえお順でソート
   const sortByKana=(a,b)=>{
@@ -3684,6 +3699,7 @@ function renderPatientList(){
         <div style="font-size:11px;color:#8E8E93;flex:1">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientBillingPeriod(p.rehabBillingStartDate,p.deadline)}</div>
         <div style="display:flex;gap:4px;flex-shrink:0">
           <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="openEditPatient('${id}')">編集</button>
+          <button class="btn btn-sm" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="endPatient('${id}')">終了</button>
           <button class="btn btn-sm btn-red" style="font-size:11px;padding:4px 8px;min-height:28px" onclick="deletePatient('${id}')">削除</button>
         </div>
       </div>
@@ -3693,7 +3709,7 @@ function renderPatientList(){
   let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">`;
 
   staffList.forEach(s=>{
-    const ids=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&patients[id].therapist===s.id).sort(sortByKana);
+    const ids=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&!isEndedPatient(id)&&patients[id].therapist===s.id).sort(sortByKana);
     const c=getStaffColor(s.id);
     html+=`<div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;background:${c.bg};border-radius:8px">
@@ -3744,7 +3760,7 @@ function checkPatientIdDuplicate(val){
   const warn=document.getElementById('np-id-warn');
   if(!warn)return;
   if(!id){warn.style.display='none';return;}
-  if(patients[id]){
+  if(patients[id] && !isArchivedPatient(id)){
     warn.textContent=`⚠️ このIDはすでに使用されています（${patients[id].name}）`;
     warn.style.color='#FF3B30';
     warn.style.display='block';
@@ -3760,7 +3776,7 @@ async function saveNewPatient(){
   const errEl=document.getElementById('np-err');
   if(!id){errEl.textContent='患者IDを入力してください';errEl.style.display='block';return;}
   if(!name){errEl.textContent='患者名を入力してください';errEl.style.display='block';return;}
-  if(patients[id]){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
+  if(patients[id] && !isArchivedPatient(id)){errEl.textContent='この患者IDはすでに登録されています';errEl.style.display='block';return;}
   const dl=document.getElementById('np-dl').value;
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
@@ -3770,16 +3786,21 @@ async function saveNewPatient(){
     therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
-  const ok=await dbAddPatient(id,newP);
+  const wasArchived=!!patients[id] && isArchivedPatient(id);
+  const ok=wasArchived?await dbUpdatePatient(id,newP):await dbAddPatient(id,newP);
   if(!ok){errEl.textContent='登録に失敗しました';errEl.style.display='block';btn.disabled=false;btn.textContent='登録する';return;}
   patients[id]=newP;
+  archivedPatientIds.delete(String(id));
+  endedPatientIds.delete(String(id));
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
   await saveRehabStartDates();
   await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
-  await dbLog('admin','add_patient',`${name}（${id}）を登録`);
+  await saveArchivedPatientIds();
+  await saveEndedPatientIds();
+  await dbLog('admin','add_patient',`${name}（${id}）を${wasArchived?'再登録':'登録'}`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast(`${name} さんを登録しました`,'#34C759');
 }
@@ -3834,9 +3855,60 @@ async function saveEditPatient(id){
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast('保存しました','#34C759');
 }
+async function endPatient(id){
+  const p=patients[id];
+  if(!p)return;
+  if(!confirm(`${p.name}（${id}）を終了にしますか？\n終了後は患者管理の名簿から終了一覧へ移動します。`))return;
+  endedPatientIds.add(String(id));
+  archivedPatientIds.delete(String(id));
+  await saveEndedPatientIds();
+  await saveArchivedPatientIds();
+  await dbLog('admin','end_patient',`${p.name}（${id}）を終了`);
+  renderPatientList();renderDeadline();renderBasicBookingTable();updateLastUpdated();
+  showToast(`${p.name}さんを終了一覧へ移動しました`,'#34C759');
+}
+
+function renderEndedPatients(){
+  const ids=Object.keys(patients).filter(id=>isEndedPatient(id)&&!isArchivedPatient(id));
+  openModal(`<div class="modal-handle"></div>
+    <div class="modal-title">終了一覧</div>
+    <div id="ended-patient-list"></div>`);
+  const el=document.getElementById('ended-patient-list');
+  if(!ids.length){el.innerHTML='<div class="empty">終了した患者はいません</div>';return;}
+  const sortByKana=(a,b)=>{
+    const ka=patients[a].kana||patients[a].name;
+    const kb=patients[b].kana||patients[b].name;
+    return ka.localeCompare(kb,'ja');
+  };
+  ids.sort(sortByKana);
+  el.innerHTML=ids.map(id=>{
+    const p=patients[id];
+    return `<div class="card" style="padding:10px 12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1"><div style="font-weight:600;font-size:14px">${p.name}</div>
+        <div style="font-size:11px;color:#8E8E93;margin-top:3px">${id} ／ ${p.disease||'疾患未登録'} ／ ${calcAge(p.dob)!==null?`${calcAge(p.dob)}歳`:'年齢未登録'} ／ ${formatPatientBillingPeriod(p.rehabBillingStartDate,p.deadline)}</div></div>
+        <button class="btn btn-sm btn-primary" onclick="reregisterPatient('${id}')">再登録</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function reregisterPatient(id){
+  const p=patients[id];
+  if(!p)return;
+  if(!confirm(`${p.name}（${id}）を患者管理の名簿へ再登録しますか？`))return;
+  endedPatientIds.delete(String(id));
+  archivedPatientIds.delete(String(id));
+  await saveEndedPatientIds();
+  await saveArchivedPatientIds();
+  await dbLog('admin','reregister_patient',`${p.name}（${id}）を再登録`);
+  closeModal();renderPatientList();renderDeadline();renderBasicBookingTable();updateLastUpdated();
+  showToast(`${p.name}さんを患者管理へ再登録しました`,'#34C759');
+}
+
 async function deletePatient(id){
   const p=patients[id];
-  if(!confirm(`${p.name}（${id}）を削除しますか？\nこの操作は取り消せません。`))return;
+  if(!confirm(`${p.name}（${id}）を削除しますか？\n患者管理の名簿から非表示になります。\n同じ患者IDで後から再登録できます。`))return;
   const ok=await dbDeletePatient(id);
   if(!ok){showToast('削除に失敗しました');return;}
   await dbLog('admin','delete_patient',`${p.name}（${id}）をアーカイブ。実施済履歴は保持`);
@@ -3901,7 +3973,7 @@ function isOverDeadline(pid){
 // ---- CSV出力 ----
 function exportCSV(){
   const header='ID,患者名,フリガナ,生年月日,性別,疾患名,担当,リハビリ開始日,期限';
-  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id)).map(([id,p])=>{
+  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id)&&!isEndedPatient(id)).map(([id,p])=>{
     const dl=p.deadline?dateStr(p.deadline):'';
     const th=p.therapist||'';
     // CSVエスケープ（カンマ・改行を含む場合はダブルクォートで囲む）
