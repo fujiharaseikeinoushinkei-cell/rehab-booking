@@ -3155,6 +3155,8 @@ let notifShowCount={patient:5,admin:5};
 // DBの既存 notifications テーブルだけで完結させるため、承認内容をmessage末尾に保存する。
 // 追加のDBカラム／テーブルは使用しない。
 const STAFF_REPLY_MARK='\n【担当者より】';
+// 管理者側の承認状態と、患者側に残すメッセージを別レコードで管理する。
+const APPROVED_MARK='\n【承認済】';
 function isPatientBookingChange(n){
   if(!n || !n.operator || n.operator==='admin')return false;
   const patientIds=new Set(Object.keys(patients||{}).map(String));
@@ -3164,7 +3166,7 @@ function isPatientBookingChange(n){
   return msg.includes('キャンセル') || msg.includes('に予約');
 }
 function getOriginalNotificationText(n){
-  return String(n?.text||'').split(STAFF_REPLY_MARK)[0].trim();
+  return String(n?.text||'').split(STAFF_REPLY_MARK)[0].split(APPROVED_MARK)[0].trim();
 }
 function getStaffReplyText(n){
   const msg=getOriginalNotificationText(n);
@@ -3185,7 +3187,8 @@ function getStaffReplyText(n){
   return '予約変更を確認しました。';
 }
 function isApprovedNotification(n){
-  return String(n?.text||'').includes(STAFF_REPLY_MARK);
+  const msg=String(n?.text||'');
+  return msg.includes(STAFF_REPLY_MARK) || msg.includes(APPROVED_MARK);
 }
 
 function renderNotifications(){
@@ -3252,15 +3255,30 @@ async function approvePatientChange(id){
   if(isApprovedNotification(n)){showToast('すでに承認済みです');return;}
   const reply=getStaffReplyText(n);
   const original=getOriginalNotificationText(n);
-  const updatedMessage=`${original}${STAFF_REPLY_MARK}${reply}`;
+  // 管理者画面の承認対象レコードと、患者側に残すメッセージを別レコードにする。
+  // これにより、管理者が元の通知を「✓」で削除しても患者側のメッセージは消えない。
+  const updatedMessage=`${original}${APPROVED_MARK}`;
   const {data,error}=await sb.from('notifications').update({message:updatedMessage,dismissed:false}).eq('id',id).select().single();
   if(error){console.error('予約変更の承認保存失敗:',error);showToast('承認の保存に失敗しました');return;}
+
+  const patientId=String(n.operator);
+  const patientMessage=`${PATIENT_MESSAGE_MARK}\n${reply}`;
+  const {data:replyData,error:replyError}=await sb.from('notifications')
+    .insert({message:patientMessage,operator:patientId,dismissed:false})
+    .select().single();
+  if(replyError){
+    console.error('患者への承認メッセージ保存失敗:',replyError);
+    showToast('患者へのメッセージ保存に失敗しました');
+    return;
+  }
+
   n.text=data?.message||updatedMessage;
+  notifications.unshift({id:replyData.id,text:replyData.message,time:'たった今',operator:replyData.operator});
   // 承認したこと自体を操作ログへ記録（通知主体は常に管理者）
   await dbLog('admin','approve_patient_change',`${n.operator}：${reply}`);
   renderNotifications();
   // 患者側が同じ端末で開いている場合にも即時反映
-  if(currentPid===String(n.operator))renderMyBook();
+  if(currentPid===patientId)renderMyBook();
   showToast('予約変更を承認しました','#34C759');
 }
 
