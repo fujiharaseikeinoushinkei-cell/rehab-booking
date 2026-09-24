@@ -2163,7 +2163,7 @@ async function renderWeekTable(){
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let doneUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done' && timesForDate(ds,th).includes(normalizeTime(t)))doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
@@ -3068,7 +3068,6 @@ async function doReserve(fullDate,time,dateStr2,dayLabel,therapist){
   const r=await dbBookSlot(fullDate,therapist,normalizeTime(time),currentPid);
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){document.getElementById('res-err').textContent=r.reason;document.getElementById('res-err').style.display='block';return;}
-  setActor('patient',currentPid);
   await dbAddNotification(`${p.name}（${currentPid}）が ${dateStr2} ${dayLabel} ${normalizeTime(time)}（${getStaffName(therapist)}）に予約`,currentPid);
   // DBから最新データを再読み込み
   await reloadBookings();
