@@ -2163,7 +2163,7 @@ async function renderWeekTable(){
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let doneUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done' && isSlotAvailable(ds,t,th))doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
@@ -4435,30 +4435,6 @@ async function saveBusinessHours(){
     }
   }
   businessHoursMatrix=newMatrix;
-
-  // 営業日設定を最優先する。午前のみ営業へ変更した日について、
-  // 今日以降の午後の未実施予約を削除し、週間表・患者側予約一覧からも消す。
-  try{
-    const todayStr=dateStr(TODAY);
-    const {data:futureBookings,error:futureBookingsError}=await sb.from('bookings')
-      .select('id,booking_date,time_slot,status')
-      .gte('booking_date',todayStr)
-      .in('status',['reserved','reference']);
-    if(futureBookingsError) throw futureBookingsError;
-    const deleteIds=(futureBookings||[]).filter(b=>{
-      const d=parseLocalDate(b.booking_date);
-      const key=`${d.getDay()}_${getWeekNumberOfMonth(d)}`;
-      return newMatrix[key]==='am' && timeMins(normalizeTime(b.time_slot))>=840;
-    }).map(b=>b.id);
-    if(deleteIds.length){
-      const {error:deleteError}=await sb.from('bookings').delete().in('id',deleteIds);
-      if(deleteError) throw deleteError;
-    }
-  }catch(e){
-    console.error('午後休み対象予約の削除失敗',e);
-    showToast('営業ルールは保存しましたが、午後休み対象の予約削除に失敗しました','#FF3B30');
-  }
-
   await dbSaveSetting('business_hours_matrix',JSON.stringify(businessHoursMatrix));
   await dbLog('admin','save_business_hours','基本営業時間設定を変更');
   const msg=document.getElementById('bh-saved');
