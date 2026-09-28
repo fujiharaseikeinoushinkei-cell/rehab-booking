@@ -1530,7 +1530,11 @@ async function dbAddNotification(text, operator=null){
   // 操作主体はログイン経路からのみ決定する。
   // 管理者ログイン → admin
   // 患者IDログイン → 患者ID
-  const actor = getCurrentActor();
+  // 管理者ログイン中 → 従来どおり admin
+  // 管理者以外で患者IDが渡された場合 → 予約経路に関係なく患者IDを主体にする
+  const currentActor = getCurrentActor();
+  const passedPid = (operator && operator !== 'admin') ? String(operator) : null;
+  const actor = (currentActor === 'admin') ? 'admin' : (passedPid || currentActor);
   if(!actor){
     console.error('通知保存中止：ログイン主体が確定していません', {text, currentActorType, currentActorPatientId});
     return false;
