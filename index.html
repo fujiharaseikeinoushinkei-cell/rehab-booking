@@ -2433,6 +2433,7 @@ function weekTableStatusModal(ds,therapist,time){
       <div style="background:#FFF7CC;border:1px solid #F0D76A;border-radius:8px;padding:10px 12px;font-size:12px;color:#7A5A00;margin-bottom:14px">この予約は「基本表 → 指定月に一括反映する」で登録された参考予約です。</div>
       <button class="btn btn-block btn-primary" onclick="wtConfirmReference('${ds}','${therapist}','${time}')">予約確定</button>
       <button class="btn btn-block" style="margin-top:8px;background:#E8F4FF;color:#004494;border-color:#B3D4FF" onclick="wtConfirmReferenceMonth('${ds}','${pid}')">同月分の参考予約すべてを予約確定させる</button>
+      <button class="btn btn-block" style="margin-top:8px;background:#FFECEC;color:#B00020;border-color:#F5B5B5" onclick="wtCancelReferenceMonth('${ds}','${pid}')">同月分の参考予約すべてをキャンセルさせる</button>
       <button class="btn btn-block" style="margin-top:8px" onclick="closeModal()">閉じる</button>`);
     return;
   }
@@ -2493,6 +2494,34 @@ async function wtConfirmReferenceMonth(ds,pid){
   renderTodaySchedule();
   renderNotifications();
   showToast(count>0?`${d.getMonth()+1}月分の参考予約 ${count}件を予約確定しました`:`${d.getMonth()+1}月分に参考予約はありません`,'#34C759');
+}
+
+async function wtCancelReferenceMonth(ds,pid){
+  const patientId=String(pid||'');
+  if(!patientId){showToast('患者情報を取得できませんでした','#FF3B30');return;}
+  const d=parseLocalDate(ds);
+  const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const start=`${ym}-01`;
+  const end=dateStr(new Date(d.getFullYear(),d.getMonth()+1,0));
+  if(!confirm(`${patients[patientId]?.name||'この患者'} さんの ${d.getMonth()+1}月分にある参考予約をすべてキャンセルしますか？\nキャンセルした枠は空き枠に戻り、他の患者が予約できるようになります。`))return;
+  // 参考予約のみを対象に cancelled へ変更（cancelled は枠を占有しない＝空き枠として再予約可能）
+  const {data,error}=await sb.from('bookings').update({status:'cancelled'})
+    .eq('patient_id',patientId).eq('status','reference')
+    .gte('booking_date',start).lte('booking_date',end)
+    .select('booking_date,time_slot,therapist');
+  if(error){
+    console.error('同月参考予約一括キャンセルに失敗',error);
+    showToast('同月分の参考予約の一括キャンセルに失敗しました。画面を更新して再度お試しください。','#FF3B30');
+    return;
+  }
+  const count=(data||[]).length;
+  if(count>0) await dbAddNotification(`${patients[patientId]?.name||patientId} ${ym} の参考予約 ${count}件をキャンセル（空き枠に戻しました）【管理者】`,'admin');
+  await reloadBookings();
+  closeModal();
+  renderWeekTable();
+  renderTodaySchedule();
+  renderNotifications();
+  showToast(count>0?`${d.getMonth()+1}月分の参考予約 ${count}件をキャンセルし、空き枠に戻しました`:`${d.getMonth()+1}月分に参考予約はありません`,'#34C759');
 }
 
 async function wtUpdateStatus(ds,therapist,time,status){
