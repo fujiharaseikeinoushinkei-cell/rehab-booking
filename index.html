@@ -403,6 +403,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div style="padding:4px 12px 12px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#8E8E93">
       <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#DBEAFE;border-radius:2px;display:inline-block"></span>空き枠（クリックで予約）</span>
       <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#FFE0B3;border-radius:2px;display:inline-block"></span>仮予約1〜5</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#FFF176;border-radius:2px;display:inline-block"></span>はじめての予約（実施済で通常色）</span>
       <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#E5E7EB;border-radius:2px;display:inline-block"></span>休診・休暇</span>
     </div>
   </div>
@@ -2090,9 +2091,51 @@ async function weekTableNav(d){
   await renderWeekTable();
 }
 
+// 患者ごとの「はじめての予約」を判定するための情報（週間表の黄色表示用）
+// firstBookingInfo[pid] = {firstKey:'YYYY-MM-DD 時刻', hasDone:実施済が1件でもあるか}
+let firstBookingInfo={};
+async function loadFirstBookingInfo(pids){
+  const info={};
+  const ids=Array.from(new Set(pids.map(String))).filter(id=>id&&patients[id]&&!isTentativePatient(id));
+  try{
+    for(let i=0;i<ids.length;i+=100){
+      const chunk=ids.slice(i,i+100);
+      const size=1000;let start=0;
+      while(true){
+        const {data,error}=await sb.from('bookings')
+          .select('patient_id,booking_date,time_slot,status')
+          .in('patient_id',chunk).in('status',['reserved','noshow','done'])
+          .range(start,start+size-1);
+        if(error)throw error;
+        (data||[]).forEach(b=>{
+          const pid=String(b.patient_id);
+          const t=normalizeTime(b.time_slot);
+          const rec=info[pid]||(info[pid]={firstKey:'',firstSort:Infinity,hasDone:false});
+          if(b.status==='done')rec.hasDone=true;
+          const sortVal=new Date(b.booking_date+'T00:00:00').getTime()+timeMins(t)*60000;
+          if(sortVal<rec.firstSort){rec.firstSort=sortVal;rec.firstKey=`${b.booking_date} ${t}`;}
+        });
+        if(!data||data.length<size)break;
+        start+=size;
+      }
+    }
+  }catch(e){
+    console.warn('初回予約の判定情報を取得できませんでした（通常表示にします）',e);
+    return {};
+  }
+  return info;
+}
 async function renderWeekTable(){
   const wsForLoad=monday(addDays(TODAY,weekTableOffset*7));
   await loadWeekTableBookings(wsForLoad);
+  {
+    const pids=[];
+    for(let i=0;i<7;i++){
+      const dsx=dateStr(addDays(wsForLoad,i));
+      Object.values(bookings[dsx]||{}).forEach(m=>Object.values(m||{}).forEach(v=>{if(v)pids.push(v);}));
+    }
+    firstBookingInfo=await loadFirstBookingInfo(pids);
+  }
   const el=document.getElementById('weektable-body');
   if(!el)return;
   const ws=monday(addDays(TODAY,weekTableOffset*7));
@@ -2191,7 +2234,11 @@ async function renderWeekTable(){
           function unitLine(uPid,uStatus,uTime,small){
             const name=patients[uPid].name;
             const tentative=isTentativePatient(uPid);
-            const bg=uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
+            // はじめての予約（実施済処理前）だけ黄色。実施済にすると通常の色に戻る。
+            const fInfo=firstBookingInfo[String(uPid)];
+            const startForKey=normalizeTime((small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime)));
+            const isFirstBooking=!!(fInfo&&!fInfo.hasDone&&uStatus==='reserved'&&!tentative&&fInfo.firstKey===`${ds} ${startForKey}`);
+            const bg=isFirstBooking?'#FFF176':uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
             const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?(Number(bUnit||2)===3?'実施済（3単位）':'実施済'):uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
             const nameStyle=uStatus==='reference'?'color:#7A5A00;':uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer'&&uStatus!=='reference')?`color:${TENTATIVE_FG};`:'';
             const clickTime=(small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime));
