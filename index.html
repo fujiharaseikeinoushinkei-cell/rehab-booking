@@ -1291,6 +1291,12 @@ async function loadAllData(){
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
+    if(r.key==='admin_hidden_notification_ids'){
+      try{
+        const parsed=JSON.parse(r.value||'[]');
+        adminHiddenNotifIds=new Set(Array.isArray(parsed)?parsed.map(String):[]);
+      }catch(e){ adminHiddenNotifIds=new Set(); }
+    }
     if(r.key==='archived_patient_ids'){
       try{
         const parsed=JSON.parse(r.value||'[]');
@@ -3198,6 +3204,13 @@ function getCurrentActor(){
   return null;
 }
 let notifShowCount={patient:5,admin:5};
+// 管理画面の「患者からの予約変更」で ✓／× を押して非表示にした通知ID。
+// 患者画面に表示されるメッセージ（承認返信など）には影響させないため、DBの dismissed は変更せず system_settings に保持する。
+let adminHiddenNotifIds=new Set();
+async function saveAdminHiddenNotifIds(){
+  const arr=Array.from(adminHiddenNotifIds).slice(-1000);
+  await dbSaveSetting('admin_hidden_notification_ids',JSON.stringify(arr));
+}
 
 // ---- 患者からの予約変更・担当者承認 ----
 // DBの既存 notifications テーブルだけで完結させるため、承認内容をmessage末尾に保存する。
@@ -3243,7 +3256,7 @@ function renderNotifications(){
   if(!notifications.length){el.innerHTML='';empty.style.display='block';cnt.style.display='none';return;}
 
   const patientIds = new Set(Object.keys(patients||{}).map(String));
-  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n));
+  const patientNotifs=notifications.filter(n=>isPatientBookingChange(n)&&!adminHiddenNotifIds.has(String(n.id)));
   const adminNotifs=notifications.filter(n=>n.operator==='admin');
   const total=patientNotifs.length+adminNotifs.length;
   cnt.textContent=total;
@@ -3313,6 +3326,14 @@ async function approvePatientChange(id){
 }
 
 async function dismissNotif(id){
+  const target=notifications.find(x=>String(x.id)===String(id));
+  if(target&&isPatientBookingChange(target)){
+    // 患者からの予約変更：管理画面上の表示だけを消す。患者に送った承認メッセージは患者画面に残す。
+    adminHiddenNotifIds.add(String(id));
+    await saveAdminHiddenNotifIds();
+    renderNotifications();
+    return;
+  }
   await sb.from('notifications').update({dismissed:true}).eq('id',id);
   notifications=notifications.filter(n=>n.id!==id);
   renderNotifications();
