@@ -4179,7 +4179,10 @@ function renderTopSubtitle(){
   const el=document.getElementById('top-nav-sub');
   if(!el)return;
   const telHref=clinicPhone?clinicPhone.replace(/[^0-9+]/g,''):'';
-  el.innerHTML=`⚠️ ${topSubtitleText||'当日キャンセルは電話をお願いします。'}${clinicPhone?`<br><a href="tel:${telHref}" style="color:#007AFF;text-decoration:none;font-weight:600">TEL.${clinicPhone}</a>`:''}`;
+  // 電話番号は tel: リンクにする（外部サイトへは遷移させない）。注意文中に直接書かれた電話番号もタップで発信できる。
+  const telLink=(num)=>`<a href="tel:${String(num).replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation();" style="color:#007AFF;text-decoration:none;font-weight:600">${num}</a>`;
+  const subtitleHtml=String(topSubtitleText||'当日キャンセルは電話をお願いします。').replace(/0\d{1,4}-\d{1,4}-\d{3,4}/g,m=>telLink(m));
+  el.innerHTML=`⚠️ ${subtitleHtml}${clinicPhone?`<br><a href="tel:${telHref}" onclick="event.stopPropagation();" style="color:#007AFF;text-decoration:none;font-weight:600">TEL.${clinicPhone}</a>`:''}`;
 }
 function populateClinicSettingsInputs(){
   const nameEl=document.getElementById('cn-name');
