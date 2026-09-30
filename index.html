@@ -712,7 +712,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="actuals-body"><div class="actuals-loading">年度を選択してください</div></div>
     <div class="actuals-note">
       ※「実際取得単位数」は予約ステータスが「実施済」の単位数を集計します。<br>
-      ※「キャンセル単位数」は「お知らせ」内の「患者からの予約変更」に記録された患者自身のキャンセルを1件=2単位として集計します。<br>
+      ※「キャンセル数」は「お知らせ」内の「患者からの予約変更」に記録された患者自身のキャンセルを1件=2単位として集計します。<br>
       ※「予約空き数」は設定された空き枠を1枠=2単位として集計します。<br>
       ※「担当者別」は、その月に実施済となった患者のユニーク人数。「運動器患者数」は担当者別患者数の総和です。<br>
       ※「新規患者数（開始）」は「患者管理」の「リハビリ開始日」を月別に集計します。<br>
@@ -4790,9 +4790,9 @@ async function loadActualsPriceSettings(){
   if(error)throw error;(data||[]).forEach(r=>{if(r.key==='actuals_rehab2_unit_price')actualsPriceSettings.rehab2=Number(r.value)||0;if(r.key==='actuals_rehab3_unit_price')actualsPriceSettings.rehab3=Number(r.value)||0;});
 }
 async function saveActualsPriceSettings(){
-  const ids=['actuals-price2','actuals-price3'],keys=['actuals_rehab2_unit_price','actuals_rehab3_unit_price'];
+  const ids=['actuals-price2'],keys=['actuals_rehab2_unit_price'];
   const vals=ids.map(id=>Number(document.getElementById(id)?.value||0));await Promise.all(keys.map((k,i)=>dbSaveSetting(k,String(vals[i]))));
-  actualsPriceSettings={rehab2:vals[0],rehab3:vals[1]};showToast('実績表の単価設定を保存しました','#34C759');renderActuals();
+  actualsPriceSettings={rehab2:vals[0]};showToast('実績表の単価設定を保存しました','#34C759');renderActuals();
 }
 function renderActualsFiscalYearSelect(){
   const el=document.getElementById('actuals-fy');if(!el)return;const cur=getCurrentFiscalYear();
@@ -4811,7 +4811,7 @@ async function renderActuals(){
     // 実際取得単位数は「実施済」のみ。
     const actual=rows.map(r=>actualsSum(r,b=>b.status==='done'));
 
-    // キャンセル単位数は「お知らせ」→「患者からの予約変更」のうち、
+    // キャンセル数は「お知らせ」→「患者からの予約変更」のうち、
     // 患者自身のキャンセル通知だけを1件=2単位として集計。
     const cancel=months.map(m=>cancelNotifs.filter(n=>{
       const d=new Date(n.created_at);
@@ -4822,8 +4822,8 @@ async function renderActuals(){
 
     // 営業日数（クリニック全体）＝ PT別営業日数の総和 ÷ PT人数
     const work=months.map(m=>staffList.length?staffList.reduce((sum,t)=>sum+actualsPtBusinessDays(m.ym,t.id),0)/staffList.length:0);
-    // キャンセル率は、実際取得単位数と患者キャンセル単位数の合計を分母とする。
-    const cancelRate=cancel.map((v,i)=>(actual[i]+v)?v/(actual[i]+v)*100:null);
+    // 当日キャンセルは、週間表の「不在」（予約はあったが来なかった）の合計。予約日の月で集計し、単位数は予約時の値を使う。
+    const sameDayCancel=rows.map(r=>actualsSum(r,b=>b.status==='noshow'));
 
     // 予約空き数は「空いている枠数×2単位」。キャンセルされた枠も空き枠として扱う。
     const open=months.map((m,i)=>staffList.reduce((sum,t)=>sum+actualsOpenUnits(m.ym,t.id,rows[i]),0));
@@ -4865,7 +4865,7 @@ async function renderActuals(){
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtBusinessDays(months[i].ym,t.id);return d?v/d:0;}));
     // 平均取得単位数（クリニック全体）＝ 担当者別の平均取得単位数の総和 ÷ PT人数
     const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+a[i],0)/staffList.length:0);
-    const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP),yearRate=(tAct+tCan)?tCan/(tAct+tCan)*100:null;
+    const total=a=>a.reduce((s,v)=>s+v,0),tAct=total(actual),tCan=total(cancel),tNew=total(newP);
     // 年間の平均：担当者ごとの年間平均取得単位数（年間単位数÷年間PT別営業日数）の総和 ÷ PT人数
     const allAvg=staffList.length?staffList.reduce((sum,t,ti)=>{const days=months.reduce((s,m)=>s+actualsPtBusinessDays(m.ym,t.id),0);return sum+(days?total(ta[ti])/days:0);},0)/staffList.length:0;
 
@@ -4875,8 +4875,8 @@ async function renderActuals(){
       ${staffList.map(t=>{const d=months.map(m=>actualsPtBusinessDays(m.ym,t.id));return arow(`${t.name}営業日数`,d.map(afmt).concat(afmt(d.reduce((a,v)=>a+v,0)/12)));}).join('')}
       ${arow('実際取得単位数',actual.map(afmt).concat(afmt(tAct/12)),'total')}
       ${arow('平均取得単位数',avg.map(afmt).concat(afmt(allAvg)),'average')}
-      ${arow('キャンセル単位数',cancel.map(afmt).concat(afmt(tCan/12)))}
-      ${arow('キャンセル率',cancelRate.map(apct).concat(apct(yearRate)))}
+      ${arow('キャンセル数',cancel.map(afmt).concat(afmt(tCan/12)))}
+      ${arow('当日キャンセル',sameDayCancel.map(afmt).concat(afmt(total(sameDayCancel)/12)))}
       ${arow('予約空き数',open.map(afmt).concat(afmt(total(open)/12)))}
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
@@ -4887,7 +4887,6 @@ async function renderActuals(){
       ${arow('新規患者数（開始）',newP.map(afmt).concat(afmt(tNew/12)))}
       <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
       ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
-      ${arow('運動器Ⅲ',months.map(()=> '—').concat('—'))}
       ${arow('リハビリテーション計画書料イ',months.map((m,i)=>amoney(nonCareNewP[i]*3000)).concat(amoney(total(nonCareNewP)*3000/12)))}
       ${arow('リハビリテーション計画書料ロ',months.map((m,i)=>amoney(Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400)).concat(amoney(months.reduce((s,m,i)=>s + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400,0)/12)))}
       ${arow('リハビリテーション計画書料２イ',months.map((m,i)=>amoney(carePlan2i[i]*2400)).concat(amoney(total(carePlan2i)*2400/12)))}
@@ -4897,8 +4896,8 @@ async function renderActuals(){
     </tbody></table></div>`;
     html+=`<div class="card" style="margin:0 16px 14px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">💴 参考額の単価設定</div>
       <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「運動器Ⅱ」の参考額に反映します。</div>
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px">
-      ${[['actuals-price2','運動器Ⅱ','rehab2'],['actuals-price3','運動器Ⅲ','rehab3']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
+      <div style="display:grid;grid-template-columns:repeat(1,minmax(140px,1fr));gap:8px">
+      ${[['actuals-price2','運動器Ⅱ','rehab2']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
       </div><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveActualsPriceSettings()">単価を保存</button></div>`;
     body.innerHTML=html;
     document.getElementById('actuals-kpi').innerHTML=`<div class="metric"><div class="metric-label">年度</div><div class="metric-value">R${reiwaYear(fy)}</div><div class="metric-sub">${fy}/4〜${fy+1}/3</div></div><div class="metric"><div class="metric-label">年間実施単位</div><div class="metric-value">${afmt(tAct)}</div><div class="metric-sub">実施済のみ</div></div><div class="metric"><div class="metric-label">年間キャンセル</div><div class="metric-value">${afmt(tCan)}</div><div class="metric-sub">患者からのキャンセル</div></div><div class="metric"><div class="metric-label">新規患者</div><div class="metric-value">${afmt(tNew)}</div><div class="metric-sub">リハビリ開始日ベース</div></div>`;
