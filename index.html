@@ -1292,6 +1292,13 @@ async function loadAllData(){
     if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
     if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
+    if(r.key==='confirmed_special_business_days'){
+      // 確定済み臨時営業日（過去の臨時営業日一覧の履歴）を復元。これがないと再読み込みで「確定済み」が消える。
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        confirmedSpecialDayIds=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ confirmedSpecialDayIds={}; }
+    }
     if(r.key==='admin_hidden_notification_ids'){
       try{
         const parsed=JSON.parse(r.value||'[]');
@@ -4359,7 +4366,7 @@ function renderSpecialDayRow(s, confirmed=false){
       <span class="chip" style="margin-left:6px;${staffChipStyle(s.therapist)}">${getStaffName(s.therapist)}</span>
     </div>
     ${confirmed
-      ? '<span style="font-size:13px;font-weight:600">確定済</span>'
+      ? `<span style="font-size:13px;font-weight:600;text-align:right">確定済${confirmedSpecialDayIds[String(s.id)]?`<br><span style="font-size:10px;font-weight:400;color:#8E8E93">${confirmedSpecialDayIds[String(s.id)]}</span>`:''}</span>`
       : `<button class="btn btn-sm btn-danger" onclick="deleteSpecialDay(${s.id})">削除</button><button class="btn btn-sm btn-primary" onclick="confirmSpecialDay(${s.id})">確定</button>`}
   </div>`;
 }
