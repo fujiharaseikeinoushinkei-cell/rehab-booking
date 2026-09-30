@@ -3831,8 +3831,13 @@ function renderPatientList(){
 function toggleEndedPatientList(){
   const el=document.getElementById('ended-patient-list');
   if(!el)return;
-  el.style.display=(el.style.display==='none')?'block':'none';
+  const opening=(el.style.display==='none');
+  el.style.display=opening?'block':'none';
+  const btn=document.getElementById('ended-list-btn');
+  if(btn)btn.textContent=opening?'終了一覧を閉じる':'終了一覧';
   renderEndedPatientList();
+  // 通常一覧の下に表示されるため、開いたときは終了一覧の位置までスクロールする
+  if(opening)el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function renderEndedPatientList(){
   const el=document.getElementById('ended-patient-list');
