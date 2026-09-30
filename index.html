@@ -2830,18 +2830,19 @@ async function renderPublicSlots(){
   const el=document.getElementById('public-slots');
   if(!el||!pubTherapist)return;
   const ws=monday(addDays(TODAY,pubWeekOffset*7));
-  const we=addDays(ws,4);
+  const we=addDays(ws,6);
   const selectedDate=pubTargetDate?parseLocalDate(pubTargetDate):null;
   const selectedDow=selectedDate?selectedDate.getDay():-1;
   // 通常は月〜金。トップの空き状況カレンダーから土日を直接選択した場合は、
   // その選択日だけを表示する（「空きあり」なのに予約画面で空きが消える不整合を防ぐ）。
   const selectedWeekend=selectedDate && (selectedDow===0||selectedDow===6);
-  const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4].map(i=>addDays(ws,i));
+  // 月〜土を表示（日曜は臨時営業日がある場合のみ枠が出るため、月〜日を対象にし、枠のない日は下の処理で自動的に省く）
+  const displayDates=selectedWeekend?[selectedDate]:[0,1,2,3,4,5,6].map(i=>addDays(ws,i));
   const labelStart=selectedWeekend?selectedDate:ws;
-  const labelEnd=selectedWeekend?selectedDate:addDays(ws,4);
+  const labelEnd=selectedWeekend?selectedDate:addDays(ws,5);
   // 管理者週間表と同じDB最新値を取得してから空き状況を描画する。
   const loadFrom=dateStr(selectedWeekend?selectedDate:ws);
-  const loadTo=dateStr(selectedWeekend?selectedDate:addDays(ws,4));
+  const loadTo=dateStr(selectedWeekend?selectedDate:addDays(ws,6));
   await refreshBookingsForDateRange(loadFrom,loadTo);
   document.getElementById('pub-week-label').textContent=
     `${labelStart.getMonth()+1}/${labelStart.getDate()} 〜 ${labelEnd.getMonth()+1}/${labelEnd.getDate()}`;
