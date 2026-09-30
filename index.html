@@ -1242,7 +1242,8 @@ async function saveRehabBillingStartDates(){
 function calcRehabDeadline(inputDateStr){
   if(!inputDateStr)return '';
   const d=parseLocalDate(inputDateStr);
-  d.setDate(d.getDate()+150);
+  // リハ期限＝リハビリ算定開始日を1日目として数えて150日目（開始日 ＋ 149日）
+  d.setDate(d.getDate()+149);
   return dateStr(d);
 }
 async function saveRehabStartDates(){
