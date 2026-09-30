@@ -4354,6 +4354,12 @@ function renderSettingsDisplay(){
 
 // ---- 外部リンク（トップページのホームページ・Instagramボタン） ----
 // ---- 臨時営業日設定 ----
+// 日本時間の「YYYY/MM/DD HH:MM」文字列（確定日時の記録用）
+function fmtDateTimeJST(d){
+  const j=new Date((d instanceof Date?d:new Date(d)).getTime()+9*3600*1000);
+  const z=n=>String(n).padStart(2,'0');
+  return `${j.getUTCFullYear()}/${z(j.getUTCMonth()+1)}/${z(j.getUTCDate())} ${z(j.getUTCHours())}:${z(j.getUTCMinutes())}`;
+}
 function saveConfirmedSpecialDayIds(){
   return dbSaveSetting('confirmed_special_business_days', JSON.stringify(confirmedSpecialDayIds));
 }
@@ -4396,7 +4402,7 @@ function togglePastSpecialDays(){
   if(a)a.textContent=open?'▼':'▶';
 }
 async function confirmSpecialDay(id){
-  const s=specialDays.find(x=>x.id===id);
+  const s=specialDays.find(x=>String(x.id)===String(id));
   if(!s)return;
   if(!confirm('この臨時営業日を確定しますか？\n確定すると「過去の臨時営業日一覧」に保存されます。'))return;
   confirmedSpecialDayIds[String(id)]=fmtDateTimeJST(new Date());
