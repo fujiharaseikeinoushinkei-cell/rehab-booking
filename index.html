@@ -712,6 +712,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="actuals-body"><div class="actuals-loading">年度を選択してください</div></div>
     <div class="actuals-note">
       ※「実際取得単位数」は予約ステータスが「実施済」の単位数を集計します。<br>
+      ※2026年9月の担当者別取得単位数は、週間表の「単位」の確定値（田中348・深澤336・合計684）に手動補正しています。<br>
       ※「キャンセル数」は「お知らせ」内の「患者からの予約変更」に記録された患者自身のキャンセルを1件=2単位として集計します。<br>
       ※「予約空き数」は設定された空き枠を1枠=2単位として集計します。<br>
       ※「担当者別」は、その月に実施済となった患者のユニーク人数。「運動器患者数」は担当者別患者数の総和です。<br>
@@ -2075,7 +2076,8 @@ async function loadWeekTableBookings(ws){
   try{
     const {data,error}=await sb.from('bookings')
       .select('booking_date,time_slot,therapist,patient_id,status,unit')
-      .gte('booking_date',from).lte('booking_date',to);
+      .gte('booking_date',from).lte('booking_date',to)
+      .order('id',{ascending:true});
     if(error) throw error;
     (data||[]).forEach(b=>{
       if(!bookings[b.booking_date])bookings[b.booking_date]={};
@@ -2300,7 +2302,7 @@ async function renderWeekTable(){
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let doneUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done'&&isWithinBusinessHours(ds,th,t))doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
@@ -4722,11 +4724,15 @@ function isCountableBookedStatus(s){return s==='reserved'||s==='done'||s==='nosh
 async function fetchBookingsPaged(from,to){
   const size=1000;let start=0,all=[];
   while(true){
-    const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
+    const {data,error}=await sb.from('bookings').select('id,booking_date,time_slot,therapist,patient_id,status,unit')
       .gte('booking_date',from).lte('booking_date',to).order('booking_date',{ascending:true}).order('id',{ascending:true}).range(start,start+size-1);
     if(error)throw error;const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
   }
-  return all;
+  // 週間表は「日付・担当・時間（正規化）」が同じ予約を1枠として扱い、最後に読んだ行（idが最大）が残る。
+  // 実績表も同じ扱いにして、同じ枠の重複行を二重に数えないようにする。
+  const bySlot=new Map();
+  all.forEach(b=>{bySlot.set(`${b.booking_date}|${b.therapist}|${normalizeTime(b.time_slot)}`,b);});
+  return Array.from(bySlot.values());
 }
 async function fetchPatientCancellationNotificationsPaged(from,to){
   // 「お知らせ」内の「患者からの予約変更」で、患者自身がキャンセルした記録だけを集計する。
@@ -4813,8 +4819,21 @@ async function renderActuals(){
 
     // 実際取得単位数は「実施済」のみ。
     // 担当者別取得単位数＝週間表の「単位」（担当別）の月合計と同じ数え方：
-    //   「実施済」と登録された予約の、予約時の単位数の合計（営業時間の内外は問わない）
-    const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
+    //   営業時間内にある「実施済」予約の、予約時の単位数の合計（営業時間外の実施済は含めない）
+    const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done'&&isWithinBusinessHours(b.booking_date,t.id,normalizeTime(b.time_slot)))));
+    // 【手動補正】週間表の「単位」を別の計算ソフトで合計した確定値を、月・担当者ごとに上書きする。
+    //   2026年9月：PT 田中 348／PT 深澤 336（実際取得単位数は合計の684）。
+    //   補正した月は、平均取得単位数・参考額など、取得単位数を使う項目もこの値を基に計算される。
+    const UNIT_OVERRIDES={'2026-09':{tanaka:348,fukasawa:336}};
+    const overrideNotes=[];
+    months.forEach((m,mi)=>{
+      const o=UNIT_OVERRIDES[m.ym];
+      if(!o)return;
+      const calc=staffList.map((t,ti)=>`${t.name} ${ta[ti][mi]}`).join('／');
+      const fixed=staffList.map((t,ti)=>`${t.name} ${o[t.id]!=null?o[t.id]:ta[ti][mi]}`).join('／');
+      overrideNotes.push(`${m.month}月：計算値（${calc}）→ 補正値（${fixed}）`);
+      staffList.forEach((t,ti)=>{if(o[t.id]!=null)ta[ti][mi]=o[t.id];});
+    });
     // 実際取得単位数＝PT 田中取得単位数 ＋ PT 深澤取得単位数（担当者別の合計）
     const actual=rows.map((r,i)=>staffList.reduce((sum,t,ti)=>sum+ta[ti][i],0));
 
@@ -4906,6 +4925,7 @@ async function renderActuals(){
       <div style="display:grid;grid-template-columns:repeat(1,minmax(140px,1fr));gap:8px">
       ${[['actuals-price2','運動器Ⅱ','rehab2']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
       </div><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveActualsPriceSettings()">単価を保存</button></div>`;
+    if(overrideNotes.length)html+=`<div class="card" style="margin:0 16px 14px;font-size:12px;color:#8E8E93;line-height:1.6"><strong style="color:#1C1C1E">手動補正の内容</strong><br>${overrideNotes.join('<br>')}<br>計算値が補正値と同じになれば、補正は不要です。</div>`;
     body.innerHTML=html;
     document.getElementById('actuals-kpi').innerHTML=`<div class="metric"><div class="metric-label">年度</div><div class="metric-value">R${reiwaYear(fy)}</div><div class="metric-sub">${fy}/4〜${fy+1}/3</div></div><div class="metric"><div class="metric-label">年間実施単位</div><div class="metric-value">${afmt(tAct)}</div><div class="metric-sub">実施済のみ</div></div><div class="metric"><div class="metric-label">年間キャンセル</div><div class="metric-value">${afmt(tCan)}</div><div class="metric-sub">患者からのキャンセル</div></div><div class="metric"><div class="metric-label">新規患者</div><div class="metric-value">${afmt(tNew)}</div><div class="metric-sub">リハビリ開始日ベース</div></div>`;
   }catch(e){console.error(e);body.innerHTML=`<div class="card" style="margin:12px 16px;color:#B00020"><strong>実績表の読み込みに失敗しました。</strong><br><span style="font-size:12px">${String(e.message||e)}</span></div>`;}
