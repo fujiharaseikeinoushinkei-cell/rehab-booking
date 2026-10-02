@@ -2133,6 +2133,7 @@ async function loadFirstBookingInfo(pids){
         const {data,error}=await sb.from('bookings')
           .select('patient_id,booking_date,time_slot,status')
           .in('patient_id',chunk).in('status',['reserved','noshow','done'])
+          .order('id',{ascending:true})
           .range(start,start+size-1);
         if(error)throw error;
         (data||[]).forEach(b=>{
@@ -2299,7 +2300,7 @@ async function renderWeekTable(){
     const ds=dateStr(d);
     THERAPISTS.forEach((th)=>{
       let doneUnits=0;
-      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done'&&isWithinBusinessHours(ds,th,t))doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
+      Object.entries(bookingStatuses[ds]?.[th]||{}).forEach(([t,status])=>{if(status==='done')doneUnits+=(bookingUnits[ds]?.[th]?.[t]||2);});
       html+=`<td style="border:1px solid #D1D1D6;padding:4px;text-align:center;min-width:${CELL_W};font-weight:700;color:#1A7F47;background:#F0FDF4">${doneUnits||''}</td>`;
     });
   });
@@ -4722,7 +4723,7 @@ async function fetchBookingsPaged(from,to){
   const size=1000;let start=0,all=[];
   while(true){
     const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,patient_id,status,unit')
-      .gte('booking_date',from).lte('booking_date',to).order('booking_date',{ascending:true}).range(start,start+size-1);
+      .gte('booking_date',from).lte('booking_date',to).order('booking_date',{ascending:true}).order('id',{ascending:true}).range(start,start+size-1);
     if(error)throw error;const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
   }
   return all;
@@ -4737,6 +4738,7 @@ async function fetchPatientCancellationNotificationsPaged(from,to){
       .gte('created_at',`${from}T00:00:00+09:00`)
       .lt('created_at',`${to}T00:00:00+09:00`)
       .order('created_at',{ascending:true})
+      .order('id',{ascending:true})
       .range(start,start+size-1);
     if(error)throw error;
     const rows=data||[];all.push(...rows);
@@ -4810,7 +4812,11 @@ async function renderActuals(){
     const first=actualsFirstDone(allRows);
 
     // 実際取得単位数は「実施済」のみ。
-    const actual=rows.map(r=>actualsSum(r,b=>b.status==='done'));
+    // 担当者別取得単位数＝週間表の「単位」（担当別）の月合計と同じ数え方：
+    //   「実施済」と登録された予約の、予約時の単位数の合計（営業時間の内外は問わない）
+    const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
+    // 実際取得単位数＝PT 田中取得単位数 ＋ PT 深澤取得単位数（担当者別の合計）
+    const actual=rows.map((r,i)=>staffList.reduce((sum,t,ti)=>sum+ta[ti][i],0));
 
     // キャンセル数は「お知らせ」→「患者からの予約変更」のうち、
     // 患者自身のキャンセル通知だけを1件=2単位として集計。
@@ -4862,7 +4868,6 @@ async function renderActuals(){
     const nonCareNewP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym) && !careInsurancePatients[String(pid)]).length);
 
 
-    const ta=staffList.map(t=>rows.map(r=>actualsSum(r,b=>b.therapist===t.id&&b.status==='done')));
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtBusinessDays(months[i].ym,t.id);return d?v/d:0;}));
     // 平均取得単位数（クリニック全体）＝ 担当者別の平均取得単位数の総和 ÷ PT人数
     const avg=months.map((m,i)=>staffList.length?tav.reduce((sum,a)=>sum+a[i],0)/staffList.length:0);
