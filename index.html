@@ -4873,7 +4873,6 @@ async function renderActuals(){
     let html=`<div class="actuals-table-wrap"><table class="actuals-table">${aheader(months)}<tbody>
       <tr class="section"><td colspan="${months.length+2}">基本実績</td></tr>
       ${arow('営業日数',work.map(afmt).concat(afmt(work.reduce((s,v)=>s+v,0)/12)))}
-      ${staffList.map(t=>{const d=months.map(m=>actualsPtBusinessDays(m.ym,t.id));return arow(`${t.name}営業日数`,d.map(afmt).concat(afmt(d.reduce((a,v)=>a+v,0)/12)));}).join('')}
       ${arow('実際取得単位数',actual.map(afmt).concat(afmt(tAct/12)),'total')}
       ${arow('平均取得単位数',avg.map(afmt).concat(afmt(allAvg)),'average')}
       ${arow('キャンセル数',cancel.map(afmt).concat(afmt(tCan/12)))}
@@ -4881,6 +4880,8 @@ async function renderActuals(){
       ${arow('予約空き数',open.map(afmt).concat(afmt(total(open)/12)))}
       <tr class="section"><td colspan="${months.length+2}">担当者別</td></tr>
       ${staffList.map((t,i)=>arow(t.name,staffPatients[i].map(afmt).concat(afmt(total(staffPatients[i])/12)))).join('')}
+      ${staffList.map((t,i)=>arow(`${t.name}取得単位数`,ta[i].map(afmt).concat(afmt(total(ta[i])/12)))).join('')}
+      ${staffList.map(t=>{const d=months.map(m=>actualsPtBusinessDays(m.ym,t.id));return arow(`${t.name}営業日数`,d.map(afmt).concat(afmt(d.reduce((a,v)=>a+v,0)/12)));}).join('')}
       ${staffList.map((t,i)=>{const days=months.reduce((s,m)=>s+actualsPtBusinessDays(m.ym,t.id),0);return arow(`${t.name} 平均取得単位数`,tav[i].map(afmt).concat(afmt(days?total(ta[i])/days:0)),'average');}).join('')}
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
