@@ -4847,19 +4847,21 @@ async function renderActuals(){
 
     // 新規患者数（開始）は「患者管理」のリハビリ開始日を月別に集計。
     const newP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym)).length);
-    // 介護保険：「有」の患者について、最初に「実施済」となった月をイ、その翌月以降をロとして計算。
-    // 介護保険の判定は患者管理の「有・無」を基準とし、初回月はリハビリ開始日ではなく実際の実施済履歴から判定する。
-    const firstDoneYmByPatient={};
-    rows.forEach((monthRows,mi)=>{
-      const ym=months[mi].ym;
-      monthRows.forEach(b=>{
-        if(b.status==='done' && careInsurancePatients[String(b.patient_id)] && !firstDoneYmByPatient[String(b.patient_id)]){
-          firstDoneYmByPatient[String(b.patient_id)]=ym;
-        }
+    // 介護保険「あり」の人数：
+    //   新規患者数（介護保険あり）＝「患者管理」のリハビリ開始日がその月で、介護保険「有」の患者数
+    //   運動器患者数（介護保険あり）＝その月に「実施済」となった患者のユニーク人数のうち、介護保険「有」の人数
+    const careNewP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym) && careInsurancePatients[String(pid)]).length);
+    const carePatients=months.map((m,i)=>{
+      const ids=new Set();
+      rows[i].forEach(b=>{
+        if(b.status==='done' && careInsurancePatients[String(b.patient_id)]) ids.add(String(b.patient_id));
       });
+      return ids.size;
     });
-    const carePlan2i=months.map(m=>Object.entries(firstDoneYmByPatient).filter(([pid,ym])=>careInsurancePatients[String(pid)] && ym===m.ym).length);
-    const carePlan2ro=months.map(m=>Object.entries(firstDoneYmByPatient).filter(([pid,ym])=>careInsurancePatients[String(pid)] && ym<m.ym).length);
+    // 計画書料２イ＝新規患者数（介護保険あり）× 2,400円
+    const carePlan2i=careNewP;
+    // 計画書料２ロ＝（運動器患者数（介護保険あり）－ 新規患者数（介護保険あり））× 1,960円（差がマイナスなら0）
+    const carePlan2ro=months.map((m,i)=>Math.max(0,carePatients[i]-careNewP[i]));
 
     // 介護保険「なし」の運動器患者数・新規患者数を計算。
     // 運動器患者数は、その月に実施済となった患者のユニーク人数から介護保険「有」を除外。
