@@ -715,7 +715,8 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       ※「キャンセル数」は「お知らせ」内の「患者からの予約変更」に記録された患者自身のキャンセルを1件=2単位として集計します。<br>
       ※「予約空き数」は設定された空き枠を1枠=2単位として集計します。<br>
       ※「担当者別」は、その月に実施済となった患者のユニーク人数。「運動器患者数」は担当者別患者数の総和です。<br>
-      ※「新規患者数（開始）」は「患者管理」の「リハビリ開始日」を月別に集計します。<br>
+      ※「新規患者数（介護保険なし）」は、「患者管理」の「リハビリ開始日」がその月で、介護保険が「無」の患者数です。<br>
+      ※「新規患者数（介護保険あり）」は、「リハビリ開始日」がその月で、介護保険が「有」の患者数です。<br>
       ※現在の予約システムには脳血管リハ・医療のみ・実施計画書・医1/医2の区分データがないため、それらは自動算定せず「—」表示にしています。<br>
       ※診療報酬の金額は請求データそのものではないため自動推定せず、単価を設定した場合のみ表示します。
     </div>
@@ -4898,7 +4899,8 @@ async function renderActuals(){
       <tr class="section"><td colspan="${months.length+2}">患者実績</td></tr>
       ${arow('運動器患者数',patients.map(afmt).concat(afmt(total(patients)/12)))}
       ${arow('介護保険保有者',months.map((m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return afmt(ids.size);}).concat(afmt(months.reduce((s,m,i)=>{const ids=new Set();rows[i].forEach(b=>{if(b.status==='done'&&careInsurancePatients[String(b.patient_id)])ids.add(String(b.patient_id));});return s+ids.size;},0)/12)))}
-      ${arow('新規患者数（開始）',newP.map(afmt).concat(afmt(tNew/12)))}
+      ${arow('新規患者数（介護保険なし）',nonCareNewP.map(afmt).concat(afmt(total(nonCareNewP)/12)))}
+      ${arow('新規患者数（介護保険あり）',careNewP.map(afmt).concat(afmt(total(careNewP)/12)))}
       <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
       ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
       ${arow('リハビリテーション計画書料イ',months.map((m,i)=>amoney(nonCareNewP[i]*3000)).concat(amoney(total(nonCareNewP)*3000/12)))}
