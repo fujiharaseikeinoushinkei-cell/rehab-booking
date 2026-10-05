@@ -966,8 +966,8 @@ function isTherapistOff(ds,th){
 // 営業時間内か（診療カレンダー・休診日・臨時営業日のみで判定。PT休暇や予約状況は見ない）
 // 週間表「単位」の集計で、営業時間外の実施済を除外するために使う。
 function isWithinBusinessHours(ds,th,time){
-  if(th&&(isSpecialBusinessSlot(ds,th,time)||isSpecialBusinessRangeCovers(ds,th,time,1))){
-    return !isHolidayPeriodOff(ds,time);
+  if(th&&isSpecialOpenAt(ds,th,time)){
+    return true; // 臨時営業日は休診日より優先
   }
   if(isDayOff(ds))return false;
   if(isAfternoonOff(ds,time))return false;
@@ -1015,10 +1015,9 @@ function actualsPtBusinessDay(ds,th){
 function actualsPtBusinessDays(ym,th){return monthDays(ym).reduce((sum,ds)=>sum+actualsPtBusinessDay(ds,th),0);}
 // スロットが予約可能かチェック（診療ルール＋PT休暇）
 function isSlotAvailable(ds,time,th){
-  // 臨時営業日として個別に登録された時間枠は、通常の休診ルールを上書きして予約可能とする
-  // （ただし休診日タブで明示的に登録された休診・PT休暇は優先して適用する）
-  if(th&&isSpecialBusinessSlot(ds,th,time)){
-    if(isHolidayPeriodOff(ds,time))return false;
+  // 臨時営業日として登録された時間帯は、休診日タブの休診（祝日など）や通常の休診ルールより優先して予約可能とする。
+  // （PT休暇だけは従来どおり優先して適用する）
+  if(th&&isSpecialOpenAt(ds,th,time)){
     if(isLeaveForSlot(ds,th,time))return false;
     return true;
   }
@@ -1111,6 +1110,10 @@ function getSpecialTimesForDay(ds,therapist){
 function isSpecialBusinessSlot(ds,therapist,time){
   return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
 }
+// 臨時営業日として開放されている時間帯か（開始時刻のみの登録・「開始-終了」の範囲のどちらも対象）
+function isSpecialOpenAt(ds,therapist,time){
+  return isSpecialBusinessSlot(ds,therapist,time)||isSpecialBusinessRangeCovers(ds,therapist,time,1);
+}
 function hasSpecialBusinessDay(ds,therapist){
   return getSpecialTimesForDay(ds,therapist).length>0;
 }
@@ -1137,7 +1140,7 @@ function isBookableStart(ds,therapist,time,unit=2){
   if(!isSlotAvailable(ds,nt,therapist))return false;
   if(isSpecialBusinessRangeCovers(ds,therapist,nt,n)){
     for(let i=0;i<n;i++){
-      if(isLeaveForSlot(ds,therapist,addMinutesToTime(nt,i*20))||isHolidayPeriodOff(ds,addMinutesToTime(nt,i*20)))return false;
+      if(isLeaveForSlot(ds,therapist,addMinutesToTime(nt,i*20)))return false;
     }
     return true;
   }
