@@ -343,8 +343,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div class="tab2 active" onclick="switchTab('a','notify',this)">お知らせ</div>
       <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
       <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
-      <div class="tab2" onclick="switchTab('a','schedule',this)">スケジュール</div>
-      <div class="tab2" onclick="switchTab('a','status',this)">ステータス</div>
       <div class="tab2" onclick="switchTab('a','patients',this)">患者管理</div>
       <div class="tab2" onclick="switchTab('a','booking',this)">代理予約</div>
       <div class="tab2" onclick="switchTab('a','slots',this)">枠設定</div>
@@ -352,10 +350,8 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
       <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
       <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
-      <div class="admin-menu-pair">
-        <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
-        <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
-      </div>
+      <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
+      <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
     </div>
   </div>
 
@@ -437,22 +433,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   </div>
 
   <!-- スケジュール -->
-  <div id="atab-schedule" style="display:none">
-    <div class="day-nav">
-      <button class="btn btn-sm" onclick="schedNav(-1)">‹ 前日</button>
-      <span id="sched-label" class="day-nav-label"></span>
-      <button class="btn btn-sm" onclick="schedNav(1)">翌日 ›</button>
-    </div>
-    <div class="pad pt-12" id="sched-body"></div>
-  </div>
-
-  <!-- ステータス管理 -->
-  <div class="pad pt-12" id="atab-status" style="display:none">
-    <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">予約のステータスを変更できます</p>
-    <div class="input-group"><label>対象日</label><input type="date" id="st-date" onchange="loadStatusSlots()"></div>
-    <div id="status-slots"></div>
-  </div>
-
   <!-- 患者管理 -->
   <div class="pad pt-12" id="atab-patients" style="display:none">
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -797,7 +777,6 @@ let weekTableOffset=0;
 let weekTableWeekendMode=false;
 let leaveFilter='';
 let currentPid=null;
-let schedTherapist="",schedView="day",schedOffset=0;
 let calYear=TODAY.getFullYear(),calMonth=TODAY.getMonth(),calSelected=null;
 let adminBookSelected=null,bkWeekOffset=0,pubWeekOffset=0;
 let pubTherapist=null;
@@ -1968,7 +1947,7 @@ function showScreen(id){
 }
 function switchTab(prefix,name,el){
   const all=prefix==='p'?['mybook','reserve','history']:
-    ['notify','weektable','calendar','schedule','status','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
+    ['notify','weektable','calendar','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
   // tab と tab2 両方のactiveを解除
@@ -1983,7 +1962,6 @@ function switchTab(prefix,name,el){
   if(name==='notify'){renderTodaySchedule();renderNotifications();}
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
-  if(name==='schedule')renderSchedule();
   if(name==='patients')renderPatientList();
   if(name==='booking')renderBasicBookingTable();
   if(name==='holidays')renderHolidays();
@@ -3612,126 +3590,6 @@ function statusChip(s){
 }
 
 // ---- SCHEDULE ----
-function schedNav(d){schedOffset+=d;renderSchedule();}
-function renderSchedule(){
-  const el=document.getElementById('sched-body');
-  const label=document.getElementById('sched-label');
-  const d=addDays(TODAY,schedOffset);
-  const ds=dateStr(d);
-  const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
-  const anySpecialToday=staffList.some(s=>hasSpecialBusinessDay(ds,s.id));
-  const isOff=isDayOff(ds)&&!anySpecialToday;
-  label.textContent=`${m}月${day}日（${wd}）${isOff?'  🔴休診':''}`;
-
-  if(isOff){
-    el.innerHTML='<div class="card" style="text-align:center;color:#B00020;padding:20px">🔴 休診日です</div>';
-    return;
-  }
-
-  // 全スタッフの時間を統合してソート
-  const allTimes=new Set();
-  staffList.forEach(s=>{
-    timesForDate(ds,s.id).forEach(t=>allTimes.add(t));
-  });
-  const sortedTimes=[...allTimes].sort((a,b)=>{
-    const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
-    return(ah*60+am)-(bh*60+bm);
-  });
-  ensureBookingShape(ds);
-
-  let html=`<div style="display:grid;grid-template-columns:repeat(${staffList.length||1},1fr);gap:10px">`;
-  staffList.forEach(s=>{
-    const th=s.id;
-    const ptName=s.name;
-    const chipStyle=staffChipStyle(th);
-    const lvFull=isLeave(ds,th)&&(leaveData.find(l=>l.therapist===th&&l.leave_date===ds)?.half_type||'full')==='full';
-    html+=`<div class="card" style="padding:10px 12px">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #E5E5EA">
-        <span class="chip" style="${chipStyle}">${ptName}</span>
-        ${lvFull?'<span class="badge badge-warn" style="font-size:10px">休暇</span>':''}
-      </div>`;
-    if(lvFull){
-      html+='<div style="font-size:12px;color:#8E8E93;text-align:center;padding:8px 0">本日休暇</div>';
-    } else {
-      const times=timesForDate(ds,th).sort((a,b)=>{
-        const [ah,am]=a.split(':').map(Number);const [bh,bm]=b.split(':').map(Number);
-        return(ah*60+am)-(bh*60+bm);
-      });
-      if(!times.length){
-        html+='<div style="font-size:12px;color:#C7C7CC">枠なし</div>';
-      } else {
-        times.forEach(t=>{
-          // スロット利用可能チェック（午後休診など）
-          const slotOff=!isSlotAvailable(ds,t,th);
-          const pid=bookings[ds]?.[th]?.[t];
-          const status=bookingStatuses[ds]?.[th]?.[t]||'reserved';
-          if(slotOff){
-            html+=`<div class="sched-row" style="opacity:.4">
-              <span class="sched-time">${t}</span>
-              <span class="sched-name" style="color:#C7C7CC">休診</span>
-            </div>`;
-          } else {
-            const empty=!pid;
-            const name=empty?'空き':(patients[pid]?.name||'不明');
-            html+=`<div class="sched-row">
-              <span class="sched-time">${t}</span>
-              <span class="sched-name" style="${empty?'color:#C7C7CC':'font-weight:500'}">${name}</span>
-              ${empty?'<span class="chip chip-open" style="font-size:10px">空き</span>':statusChip(status)}
-            </div>`;
-          }
-        });
-      }
-    }
-    html+='</div>';
-  });
-  html+='</div>';
-  el.innerHTML=html;
-}
-
-// ---- STATUS MANAGEMENT ----
-function loadStatusSlots(){
-  const ds=document.getElementById('st-date').value;
-  if(!ds){document.getElementById('status-slots').innerHTML='';return;}
-  ensureBookingShape(ds);
-  const d=new Date(ds);
-  let html='';
-  staffList.forEach(s=>{
-    const th=s.id;
-    const times=timesForDate(ds,th);
-    if(!times.length)return;
-    html+=`<div class="card"><div style="font-size:13px;font-weight:600;margin-bottom:8px">${getStaffName(th)}</div>`;
-    times.forEach(t=>{
-      const nt=normalizeTime(t);
-      const pid=bookings[ds]?.[th]?.[nt];
-      const status=bookingStatuses[ds]?.[th]?.[nt]||'reserved';
-      const name=pid?(patients[pid]?.name||'不明'):'（空き）';
-      const rowStyle=status==='noshow'?'background:#FFE0E0;border-radius:8px;padding:0 6px;':status==='done'?'background:#D1FAE5;border-radius:8px;padding:0 6px;':'';
-      html+=`<div class="sched-row" style="${rowStyle}">
-        <span class="sched-time">${t}</span>
-        <span class="sched-name">${name}</span>
-        ${pid?`<div class="status-btns">
-          <button class="btn btn-sm btn-green" onclick="updateStatus('${ds}','${th}','${t}','done')" ${status==='done'?'disabled':''}>実施済</button>
-          <button class="btn btn-sm btn-orange" onclick="updateStatus('${ds}','${th}','${t}','transfer')" ${status==='transfer'?'disabled':''}>振替</button>
-          <button class="btn btn-sm btn-danger" onclick="updateStatus('${ds}','${th}','${t}','cancelled')" ${status==='cancelled'?'disabled':''}>①キャンセル</button>
-          <button class="btn btn-sm" style="background:#FFE0E0;color:#B00020;border-color:#FFB3B3" onclick="updateStatus('${ds}','${th}','${t}','noshow')" ${status==='noshow'?'disabled':''}>②来なかった</button>
-        </div>`:'-'}
-      </div>`;
-    });
-    html+='</div>';
-  });
-  document.getElementById('status-slots').innerHTML=html||'<div class="empty">この日の予約枠はありません</div>';
-}
-async function updateStatus(date,therapist,time,status){
-  const r=await dbUpdateStatus(date,therapist,time,status);
-  if(!r.ok){showToast('更新に失敗しました');return;}
-  const pName=await resolvePatientName(r.patientId);
-  const label={done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
-  await dbAddNotification(`${pName} ${date} ${time} を「${label}」に変更【管理者】`,'admin');
-  renderNotifications();
-  loadStatusSlots();
-  showToast(`${label}に変更しました`,'#34C759');
-}
-
 // ---- SLOT DEFS ----
 function renderSlotDefs(){
   const el=document.getElementById('slot-list');
