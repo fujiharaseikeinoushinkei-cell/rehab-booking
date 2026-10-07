@@ -694,6 +694,26 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="saveBusinessHours()">この内容で保存する</button>
       <p id="bh-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました。各画面に反映されます</p>
     </div>
+
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">営業日の時間枠（営業日数の基準）</div>
+      <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
+        実績表の営業日数の計算に使います。担当者ごとに、その日の予約枠（「枠設定」の枠と「臨時営業日」の時間）のうち、営業しているものが<br>
+        ・午前の時間枠に1つでも入る → 0.5日<br>
+        ・午後の時間枠に1つでも入る → 0.5日<br>
+        ・午前・午後の両方に入る → 1.0日<br>
+        となります。休診の日や休診の時間帯の枠は数えません。
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="input-group"><label>午前の開始</label><input type="time" id="bw-am-start"></div>
+        <div class="input-group"><label>午前の終了</label><input type="time" id="bw-am-end"></div>
+        <div class="input-group"><label>午後の開始</label><input type="time" id="bw-pm-start"></div>
+        <div class="input-group"><label>午後の終了</label><input type="time" id="bw-pm-end"></div>
+      </div>
+      <button class="btn btn-primary btn-block" style="margin-top:6px" onclick="saveBusinessTimeWindows()">この内容で保存する</button>
+      <p id="bw-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました。実績表の営業日数に反映されます</p>
+      <p id="bw-err" style="font-size:13px;color:#FF3B30;margin-top:8px;display:none;text-align:center"></p>
+    </div>
   </div>
 
   <!-- 実績表 -->
@@ -774,6 +794,29 @@ let pubTargetDate=null;
 let topCalYear=TODAY.getFullYear(),topCalMonth=TODAY.getMonth();
 let topCalBookings={};
 let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
+// 営業日数の基準となる時間枠（午前／午後）。枠の「開始時刻」が [開始, 終了) に入れば、その時間枠に該当する。
+let businessTimeWindows={amStart:'8:30',amEnd:'12:00',pmStart:'14:00',pmEnd:'18:00'};
+function populateBusinessTimeInputs(){
+  const pad=t=>{const [h,m]=normalizeTime(t).split(':');return `${String(h).padStart(2,'0')}:${String(m||'00').padStart(2,'0')}`;};
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=pad(v);};
+  set('bw-am-start',businessTimeWindows.amStart);set('bw-am-end',businessTimeWindows.amEnd);
+  set('bw-pm-start',businessTimeWindows.pmStart);set('bw-pm-end',businessTimeWindows.pmEnd);
+}
+async function saveBusinessTimeWindows(){
+  const g=id=>document.getElementById(id).value;
+  const v={amStart:g('bw-am-start'),amEnd:g('bw-am-end'),pmStart:g('bw-pm-start'),pmEnd:g('bw-pm-end')};
+  const err=document.getElementById('bw-err'),ok=document.getElementById('bw-saved');
+  err.style.display='none';ok.style.display='none';
+  if(!v.amStart||!v.amEnd||!v.pmStart||!v.pmEnd){err.textContent='4つの時刻をすべて入力してください';err.style.display='block';return;}
+  if(!(timeMins(v.amStart)<timeMins(v.amEnd)&&timeMins(v.amEnd)<=timeMins(v.pmStart)&&timeMins(v.pmStart)<timeMins(v.pmEnd))){
+    err.textContent='「午前の開始 < 午前の終了 ≦ 午後の開始 < 午後の終了」になるように入力してください';err.style.display='block';return;
+  }
+  businessTimeWindows={amStart:normalizeTime(v.amStart),amEnd:normalizeTime(v.amEnd),pmStart:normalizeTime(v.pmStart),pmEnd:normalizeTime(v.pmEnd)};
+  await dbSaveSetting('business_time_windows',JSON.stringify(businessTimeWindows));
+  await dbLog('admin','save_business_time_windows','営業日の時間枠を変更');
+  ok.style.display='block';setTimeout(()=>ok.style.display='none',2500);
+  updateLastUpdated();
+}
 
 // ---- スタッフ（担当PT）管理 ----
 // staffList: [{id:'tanaka', name:'PT 田中'}, ...] 設定タブから増減可能
@@ -977,32 +1020,18 @@ function isWithinBusinessHours(ds,th,time){
 }
 // 担当者ごとの1日の営業日数（全日=1／午前のみ・午後のみ=0.5／休診=0、臨時営業日は合計時間で判定、PT休暇を控除）
 function actualsPtBusinessDay(ds,th){
-  // ① 通常の営業状況から基本日数を決める（全日=1／午前のみ・午後のみ=0.5／休診=0）
-  let base=0;
-  if(!isDayOff(ds)){
-    const st=getBusinessStatus(ds);
-    base=(st==='am'||st==='pm')?0.5:1;
-    const hd=holidayData.find(h=>h.holiday_date===ds);
-    const hp=hd?(hd.period||'full'):'';
-    if(hp==='am'||hp==='pm'){
-      if(base===1)base=0.5;
-      else if(st===hp)base=0;
-    }
-  }
-  // ② 通常は営業しない日（休診など）に臨時営業日が設定されている場合：
-  //    同日の営業時間の合計で判定（200分未満=0／200〜399分=0.5／400分以上=1）。
-  //    すでに営業している日に臨時営業を追加しても、通常の日数を減らさない。
-  if(base===0){
-    const sp=specialDays.filter(x=>x.special_date===ds&&x.therapist===th);
-    if(sp.length){
-      let mins=0;
-      sp.forEach(x=>{
-        const parts=String(x.time_slot||'').split('-').map(v=>v.trim());
-        mins+=(parts.length>=2&&parts[0]&&parts[1])?Math.max(0,timeMins(parts[1])-timeMins(parts[0])):20;
-      });
-      base=mins>=400?1:mins>=200?0.5:0;
-    }
-  }
+  // ① その日の担当者の予約枠＝「枠設定」の枠＋「臨時営業日」の時間のうち、営業しているもの
+  //    （休診・午前のみ／午後のみ・休診日の時間帯を除外。臨時営業日は休診日より優先）
+  const w=businessTimeWindows;
+  const inRange=(t,a,b)=>{const m=timeMins(t);return m>=timeMins(a)&&m<timeMins(b);};
+  let am=false,pm=false;
+  timesForDate(ds,th).forEach(t=>{
+    if(!isWithinBusinessHours(ds,th,t))return;
+    if(inRange(t,w.amStart,w.amEnd))am=true;
+    if(inRange(t,w.pmStart,w.pmEnd))pm=true;
+  });
+  // ② 午前の時間枠に該当＝0.5日／午後の時間枠に該当＝0.5日／両方＝1.0日
+  let base=(am?0.5:0)+(pm?0.5:0);
   // ③ PT休暇の控除（半休=0.5／全休=1.0）
   const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
   if(lv){
@@ -1295,6 +1324,12 @@ async function loadAllData(){
     if(r.key==='reception_end')settings.end=r.value;
     if(r.key==='reception_time_start')settings.tstart=r.value;
     if(r.key==='reception_time_end')settings.tend=r.value;
+    if(r.key==='business_time_windows'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        if(parsed&&parsed.amStart&&parsed.amEnd&&parsed.pmStart&&parsed.pmEnd)businessTimeWindows={amStart:normalizeTime(parsed.amStart),amEnd:normalizeTime(parsed.amEnd),pmStart:normalizeTime(parsed.pmStart),pmEnd:normalizeTime(parsed.pmEnd)};
+      }catch(e){console.warn('営業日の時間枠の読み込みに失敗しました',e);}
+    }
     if(r.key==='business_hours_matrix'){
       try{
         const parsed=JSON.parse(r.value);
@@ -1945,7 +1980,7 @@ function switchTab(prefix,name,el){
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
   if(name==='logs')renderLogs();
   if(name==='deadline')renderDeadline();
-  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();}
+  if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();populateBusinessTimeInputs();}
   if(name==='actuals'){renderActuals();}
 }
 
@@ -3448,7 +3483,26 @@ function renderCal(){
   html+='</div>';
   document.getElementById('cal-grid').innerHTML=html;
 }
+// カレンダーの日付をクリック → その日を含む週の「週間表」を表示する
 function calClick(ds){
+  calSelected=ds;
+  const d=parseLocalDate(ds);
+  const ws=monday(d);
+  const oneWeek=7*24*60*60*1000;
+  weekTableOffset=Math.round((ws.getTime()-monday(TODAY).getTime())/oneWeek);
+  // 土・日をクリックした場合は、その週に週末営業があれば週末表示、なければ月〜金の表示にする
+  weekTableWeekendMode=false;
+  if(d.getDay()===0||d.getDay()===6){
+    try{
+      if(weekTableWeekendDays(ws).some(x=>dateStr(x)===ds))weekTableWeekendMode=true;
+    }catch(e){weekTableWeekendMode=false;}
+  }
+  const tabBtn=document.querySelector('#s-admin .tab2[onclick*="\'weektable\'"]');
+  if(tabBtn)switchTab('a','weektable',tabBtn);
+  else renderWeekTable();
+}
+// （旧）カレンダーで日付をクリックしたときの、その日の予約一覧表示。現在は使用していない。
+function calShowDetail(ds){
   calSelected=ds;renderCal();
   const d=parseLocalDate(ds);const m=d.getMonth()+1,day=d.getDate(),wd=DAY_NAMES[d.getDay()];
   const appts=[];
