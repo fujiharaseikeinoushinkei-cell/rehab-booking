@@ -77,6 +77,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 .cal-cell.holiday-cell{background:#FFE0E0;color:#B00020}
 .cal-cell.today{background:#007AFF;color:#fff;border-radius:50%}
 .cal-cell.selected{outline:2px solid #007AFF}
+.cal-cell.pt-hit{background:#FFF3D6;color:#7A4B00;outline:2px solid #FF9500;justify-content:flex-start}
+.cal-pt{display:block;font-size:8px;line-height:1.25;font-weight:600;margin-top:2px;word-break:break-all}
+.cal-pt-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #F2F2F7;font-size:13px}
+.cal-pt-row:last-child{border-bottom:none}
 .top-cal-cell{font-size:12px;text-align:center;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:36px;display:flex;align-items:center;justify-content:center;font-weight:500;flex-direction:column;gap:1px}.top-cal-cell.other{color:#C7C7CC;font-weight:400;cursor:default}.top-cal-cell.open-day{background:#D1F0DF;color:#1A7F47}.top-cal-cell.closed-day{background:#FFE0E0;color:#B00020;cursor:default}.top-cal-cell.today{outline:2px solid #007AFF;outline-offset:-2px}.top-cal-cell.selected{box-shadow:inset 0 0 0 2px #007AFF}.sched-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #F2F2F7;min-height:44px}
 .sched-time{font-size:12px;color:#8E8E93;min-width:38px}
 .sched-name{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -416,11 +420,18 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <button class="btn btn-sm" onclick="calNav(1)">›</button>
     </div>
     <div class="pad pt-12">
+      <div class="card" style="padding:12px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">患者検索</div>
+        <div id="cal-pt-selected" style="display:none"></div>
+        <div class="input-group" style="margin-bottom:0"><input type="text" id="cal-pt-search" placeholder="名前・ふりがな・患者IDで検索" oninput="calPatientSearch(this.value)" autocomplete="off"></div>
+        <div id="cal-pt-results"></div>
+      </div>
       <div class="card" style="padding:12px"><div id="cal-grid"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#8E8E93">
           <span>🟢予約あり</span><span style="color:#B00020">🔴休診日</span>
         </div>
       </div>
+      <div id="cal-pt-list" style="display:none;margin-top:10px"></div>
       <div id="cal-detail" style="display:none"></div>
     </div>
   </div>
@@ -3457,6 +3468,67 @@ async function dismissNotif(id){
 }
 
 // ---- CALENDAR ----
+// ---- カレンダーの患者検索 ----
+let calPatientId=null;
+let calPatientBookings={}; // {日付: [{time,therapist,status}]}
+const CAL_STATUS_LABEL={reserved:'予約',reference:'参考予約',done:'実施済',noshow:'不在',transfer:'振替'};
+function calNormalizeText(v){return String(v||'').replace(/[\s\u3000]/g,'').toLowerCase();}
+function calPatientSearch(q){
+  const box=document.getElementById('cal-pt-results');
+  const key=calNormalizeText(q);
+  if(!key){box.innerHTML='';return;}
+  const hits=Object.keys(patients).filter(id=>!isArchivedPatient(id)&&!isTentativePatient(id)).filter(id=>{
+    const p=patients[id];
+    return calNormalizeText(p.name).includes(key)||calNormalizeText(p.kana).includes(key)||calNormalizeText(id).includes(key);
+  }).sort((a,b)=>(patients[a].kana||patients[a].name).localeCompare(patients[b].kana||patients[b].name,'ja')).slice(0,8);
+  if(!hits.length){box.innerHTML='<div style="font-size:12px;color:#8E8E93;padding:8px 2px">該当する患者がいません</div>';return;}
+  box.innerHTML=hits.map(id=>`<div class="cal-pt-row" style="cursor:pointer" onclick="calSelectPatient('${id}')"><span style="font-weight:600">${patients[id].name}</span><span style="font-size:11px;color:#8E8E93">${id}${isEndedPatient(id)?' ／終了':''}</span></div>`).join('');
+}
+async function calSelectPatient(id){
+  const p=patients[id];
+  if(!p)return;
+  calPatientId=id;
+  document.getElementById('cal-pt-search').value='';
+  document.getElementById('cal-pt-results').innerHTML='';
+  const {data,error}=await sb.from('bookings').select('booking_date,time_slot,therapist,status')
+    .eq('patient_id',id).neq('status','cancelled').order('booking_date',{ascending:true});
+  if(error){showToast('予約の取得に失敗しました');calPatientId=null;return;}
+  calPatientBookings={};
+  (data||[]).forEach(b=>{
+    (calPatientBookings[b.booking_date]=calPatientBookings[b.booking_date]||[]).push({time:normalizeTime(b.time_slot),therapist:b.therapist,status:b.status});
+  });
+  Object.values(calPatientBookings).forEach(a=>a.sort((x,y)=>timeMins(x.time)-timeMins(y.time)));
+  // 表示中の月に予約がなければ、直近（今日以降で最も近い、なければ最後）の予約の月へ移動する
+  const dates=Object.keys(calPatientBookings).sort();
+  const ym=`${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  if(dates.length&&!dates.some(d=>d.startsWith(ym))){
+    const target=dates.find(d=>d>=dateStr(TODAY))||dates[dates.length-1];
+    const t=parseLocalDate(target);calYear=t.getFullYear();calMonth=t.getMonth();
+  }
+  renderCal();
+}
+function calClearPatient(){
+  calPatientId=null;calPatientBookings={};
+  renderCal();
+}
+function renderCalPatientPanel(){
+  const sel=document.getElementById('cal-pt-selected');
+  const list=document.getElementById('cal-pt-list');
+  if(!sel||!list)return;
+  if(!calPatientId||!patients[calPatientId]){sel.style.display='none';sel.innerHTML='';list.style.display='none';list.innerHTML='';return;}
+  const p=patients[calPatientId];
+  sel.style.display='flex';
+  sel.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 10px;background:#FFF3D6;border-radius:10px';
+  sel.innerHTML=`<span style="flex:1;font-size:13px;font-weight:600">${p.name}<span style="font-size:11px;font-weight:400;color:#8E8E93;margin-left:6px">${calPatientId}</span></span><button class="btn btn-sm" onclick="calClearPatient()">解除</button>`;
+  const ym=`${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  const rows=[];
+  Object.keys(calPatientBookings).sort().filter(d=>d.startsWith(ym)).forEach(d=>{
+    const dt=parseLocalDate(d);
+    calPatientBookings[d].forEach(b=>rows.push(`<div class="cal-pt-row"><span style="min-width:74px;font-weight:600">${dt.getMonth()+1}/${dt.getDate()}（${DAY_NAMES[dt.getDay()]}）</span><span style="min-width:44px">${b.time}</span><span class="chip" style="${staffChipStyle(b.therapist)}">${getStaffName(b.therapist)}</span><span style="font-size:11px;color:#8E8E93">${CAL_STATUS_LABEL[b.status]||b.status}</span></div>`));
+  });
+  list.style.display='block';
+  list.innerHTML=`<div class="card" style="padding:12px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">${p.name}さんの${calMonth+1}月の予約</div>${rows.length?rows.join(''):'<div style="font-size:12px;color:#8E8E93">この月の予約はありません</div>'}</div>`;
+}
 function renderCal(){
   document.getElementById('cal-label').textContent=`${calYear}年${calMonth+1}月`;
   const first=new Date(calYear,calMonth,1).getDay();
@@ -3476,12 +3548,16 @@ function renderCal(){
     else if(isH)cls+=' holiday-cell';
     else if(hasA)cls+=' has-appt';
     if(isSel&&!isT)cls+=' selected';
-    html+=`<div class="${cls}" onclick="calClick('${ds}')">${d}${isH&&!isT?'<span style="font-size:8px;display:block;margin-top:1px">休</span>':''}</div>`;
+    const pb=calPatientId?calPatientBookings[ds]:null;
+    if(pb&&pb.length&&!isT)cls+=' pt-hit';
+    const ptChips=pb?pb.map(b=>`<span class="cal-pt">${patients[calPatientId]?patients[calPatientId].name:''}<br>${b.time}</span>`).join(''):'';
+    html+=`<div class="${cls}" onclick="calClick('${ds}')">${d}${isH&&!isT&&!ptChips?'<span style="font-size:8px;display:block;margin-top:1px">休</span>':''}${ptChips}</div>`;
   }
   const rem=(7-((first+dim)%7))%7;
   for(let i=1;i<=rem;i++)html+=`<div class="cal-cell other">${i}</div>`;
   html+='</div>';
   document.getElementById('cal-grid').innerHTML=html;
+  renderCalPatientPanel();
 }
 // カレンダーの日付をクリック → その日を含む週の「週間表」を表示する
 function calClick(ds){
