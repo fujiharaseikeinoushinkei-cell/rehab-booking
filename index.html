@@ -1935,7 +1935,7 @@ async function renderTopAvailabilityCalendar(){
     const ds=`${topCalYear}-${String(topCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const date=parseLocalDate(ds);
     const isPast=date<TODAY;
-    const isHolidayDay=isHoliday(ds)||date.getDay()===0;
+    const isHolidayDay=(isHoliday(ds)||date.getDay()===0)&&!hasSpecialBusinessDay(ds,topCalTherapist); // 臨時営業日は休診日より優先
     const hasOpen=topCalHasOpen(ds,topCalTherapist);
     let cls='top-cal-cell';
     if(isHolidayDay&&!hasOpen)cls+=' closed-day';
@@ -3553,7 +3553,7 @@ function renderCal(){
   for(let d=1;d<=dim;d++){
     const ds=`${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isT=ds===dateStr(TODAY);
-    const isH=isHoliday(ds)||new Date(ds).getDay()===0;
+    const isH=(isHoliday(ds)||new Date(ds).getDay()===0)&&!staffList.some(s=>hasSpecialBusinessDay(ds,s.id)); // 臨時営業日は休診日より優先
     const hasA=bookings[ds]?staffList.some(s=>Object.values(bookings[ds][s.id]||{}).some(v=>v)):false;
     const isSel=calSelected===ds;
     let cls='cal-cell';
