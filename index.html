@@ -220,7 +220,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </button>
     <div id="top-availability-calendar" class="card" style="margin-top:12px;padding:12px;text-align:left">
       <div style="font-size:14px;font-weight:700;text-align:center;margin-bottom:4px">📅 リハビリ空き状況カレンダー</div>
-      <div style="font-size:11px;color:#8E8E93;text-align:center;margin-bottom:8px">空きがある日付に色がついています。担当を選ぶと、その担当の空き状況に切り替わります。空きのある日付をクリックすると、その日の時間枠（予約画面）が開きます。</div>
+      <div id="top-cal-notice" style="font-size:11px;color:#8E8E93;text-align:center;margin-bottom:8px"></div>
       <div id="top-cal-start" style="text-align:center;padding:8px 4px 4px">
         <button class="btn btn-block" onclick="topCalShow()" style="min-width:120px;background:#fff;color:#000;border:1px solid #C7C7CC;box-shadow:none">表示</button>
       </div>
@@ -345,8 +345,8 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
       <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
       <div class="tab2" onclick="switchTab('a','patients',this)">患者管理</div>
-      <div class="tab2" onclick="switchTab('a','booking',this)">代理予約</div>
-      <div class="tab2" onclick="switchTab('a','slots',this)">枠設定</div>
+      <div class="tab2" onclick="switchTab('a','booking',this)">一括予約</div>
+      <div class="tab2" onclick="switchTab('a','slots',this)">リハビリ時間設定</div>
       <div class="tab2" onclick="switchTab('a','holidays',this)">休診日</div>
       <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
       <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
@@ -451,7 +451,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div class="card" style="background:#F5F5F7;border-color:#D1D1D6;margin-bottom:12px">
       <div style="font-size:15px;font-weight:700;margin-bottom:6px">📋 基本表</div>
       <p style="font-size:12px;color:#636366;line-height:1.6;margin:0">
-        「枠設定」に登録されている担当者・曜日・時間を基本表として、各予約枠に患者を設定します。
+        「リハビリ時間設定」に登録されている担当者・曜日・時間を基本表として、各予約枠に患者を設定します。
         「〇月に一括反映する」を押すと、指定月の営業日で空いている同じ曜日・時間の枠へ自動登録します。
       </p>
     </div>
@@ -677,7 +677,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div style="font-size:14px;font-weight:600;margin-bottom:6px">基本営業時間（曜日・週パターン）</div>
       <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
         曜日ごとに、月の第何週かによって営業状況を設定できます。<br>
-        「終日」＝通常営業（時間は「枠設定」タブで登録した枠に従う）／「午前のみ」＝14:00以降休診／「午後のみ」＝14:00より前休診／「休診」＝終日休診。<br>
+        「終日」＝通常営業（時間は「リハビリ時間設定」タブで登録した枠に従う）／「午前のみ」＝14:00以降休診／「午後のみ」＝14:00より前休診／「休診」＝終日休診。<br>
         祝日など特定の日だけを休診にしたい場合は「休診日」タブをご利用ください。
       </p>
       <div class="table-wrap">
@@ -690,7 +690,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div class="card">
       <div style="font-size:14px;font-weight:600;margin-bottom:6px">営業日の時間枠（営業日数の基準）</div>
       <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
-        実績表の営業日数の計算に使います。担当者ごとに、その日の予約枠（「枠設定」の枠と「臨時営業日」の時間）のうち、営業しているものが<br>
+        実績表の営業日数の計算に使います。担当者ごとに、その日の予約枠（「リハビリ時間設定」の枠と「臨時営業日」の時間）のうち、営業しているものが<br>
         ・午前の時間枠に1つでも入る → 0.5日<br>
         ・午後の時間枠に1つでも入る → 0.5日<br>
         ・午前・午後の両方に入る → 1.0日<br>
@@ -785,7 +785,7 @@ let pubTherapist=null;
 let pubTargetDate=null;
 let topCalYear=TODAY.getFullYear(),topCalMonth=TODAY.getMonth();
 let topCalBookings={};
-let topCalTherapist=''; // トップカレンダーで選択中の担当（空＝全担当）
+let topCalTherapist=''; // トップカレンダーで選択中の担当（空のときは先頭の担当を自動選択）
 let businessHoursMatrix=defaultBusinessHoursMatrix(); // DB読み込み前はデフォルト値を使用
 // 営業日数の基準となる時間枠（午前／午後）。枠の「開始時刻」が [開始, 終了) に入れば、その時間枠に該当する。
 let businessTimeWindows={amStart:'8:30',amEnd:'12:00',pmStart:'14:00',pmEnd:'18:00'};
@@ -1826,11 +1826,24 @@ function topCalShow(){
   if(content)content.style.display='block';
   renderTopAvailabilityCalendar();
 }
+function renderTopCalNotice(){
+  const el=document.getElementById('top-cal-notice');
+  if(!el)return;
+  let first='空きのある日付には色がついています。';
+  if(settings.end){
+    const e=parseLocalDate(settings.end);
+    const mm=(e.getFullYear()!==TODAY.getFullYear()?`${e.getFullYear()}年`:'')+`${e.getMonth()+1}月`;
+    first=`現在${mm}までの予約を受け付けております。`+first;
+  }
+  el.innerHTML=`${first}<div style="display:inline-block;text-align:left;margin-top:4px">1　担当を選ぶ。<br>2　空きのある日付をクリックして「予約」をする。</div>`;
+}
 function renderTopCalTherapistChips(){
   const el=document.getElementById('top-cal-th');
   if(!el)return;
+  // 担当は必ず1人を選択した状態にする（未選択・不明のときは先頭の担当）
+  if(!staffList.some(s=>s.id===topCalTherapist))topCalTherapist=staffList[0]?staffList[0].id:'';
   const chip=(id,label)=>`<button class="btn btn-sm" onclick="topCalSelectTherapist('${id}')" style="${topCalTherapist===id?'background:#007AFF;color:#fff;border-color:#007AFF':'background:#fff;color:#000;border:1px solid #C7C7CC;box-shadow:none'}">${label}</button>`;
-  el.innerHTML=chip('','全担当')+staffList.map(s=>chip(s.id,s.name)).join('');
+  el.innerHTML=staffList.map(s=>chip(s.id,s.name)).join('');
 }
 // カレンダー内で担当を選ぶと、その担当の空き状況でカレンダーを再表示する
 function topCalSelectTherapist(id){
@@ -1901,6 +1914,7 @@ async function renderTopAvailabilityCalendar(){
   const label=document.getElementById('top-cal-label');
   if(!grid||!label)return;
   label.textContent=`${topCalYear}年${topCalMonth+1}月`;
+  renderTopCalNotice();
   renderTopCalTherapistChips();
   grid.innerHTML='<div style="text-align:center;color:#8E8E93;font-size:12px;padding:10px">空き状況を確認中…</div>';
   // トップカレンダーも同じ予約キャッシュを最新DB値で更新してから判定する。
@@ -2239,7 +2253,7 @@ async function renderWeekTable(){
   if(!sortedTimes.length){
     el.innerHTML=isWeekendView
       ?'<div class="empty">この週に土曜日・日曜日の営業はありません</div>'
-      :'<div class="empty">予約枠が設定されていません<br><small>管理画面「枠設定」から追加してください</small></div>';
+      :'<div class="empty">予約枠が設定されていません<br><small>管理画面「リハビリ時間設定」から追加してください</small></div>';
     return;
   }
 
@@ -4231,7 +4245,7 @@ function renderBasicBookingTable(){
     html+=`<div style="padding:8px 10px;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:8px">
       <div style="font-size:13px;font-weight:700;margin-bottom:6px">${day.name}</div>`;
     if(!times.length){
-      html+='<div style="font-size:12px;color:#8E8E93">枠設定なし</div>';
+      html+='<div style="font-size:12px;color:#8E8E93">リハビリ時間設定なし</div>';
     }else{
       html+='<div style="display:flex;flex-direction:column;gap:6px">';
       times.forEach(time=>{
