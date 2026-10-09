@@ -1829,13 +1829,16 @@ function topCalShow(){
 function renderTopCalNotice(){
   const el=document.getElementById('top-cal-notice');
   if(!el)return;
-  let first='空きのある日付には色がついています。';
+  // 1行目：受付終了日の月（設定の「予約受付期間」）。未設定のときは省略
+  let line1='';
   if(settings.end){
     const e=parseLocalDate(settings.end);
     const mm=(e.getFullYear()!==TODAY.getFullYear()?`${e.getFullYear()}年`:'')+`${e.getMonth()+1}月`;
-    first=`現在${mm}までの予約を受け付けております。`+first;
+    line1=`<div>現在${mm}までの予約を受け付けております。</div>`;
   }
-  el.innerHTML=`${first}<div style="display:inline-block;text-align:left;margin-top:4px">1　担当を選ぶ。<br>2　空きのある日付をクリックして「予約」をする。</div>`;
+  el.innerHTML=line1
+    +'<div>空きのある日付には色がついています。</div>'
+    +'<div style="display:table;margin:6px auto 0;text-align:left">1　担当を選ぶ。<br>2　空きのある日付をクリックして「予約」をする。</div>';
 }
 function renderTopCalTherapistChips(){
   const el=document.getElementById('top-cal-th');
