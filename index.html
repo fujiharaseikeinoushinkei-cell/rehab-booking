@@ -1039,7 +1039,7 @@ function actualsPtBusinessDays(ym,th){return monthDays(ym).reduce((sum,ds)=>sum+
 function isSlotAvailable(ds,time,th){
   // 臨時営業日として登録された時間帯は、休診日タブの休診（祝日など）や通常の休診ルールより優先して予約可能とする。
   // （PT休暇だけは従来どおり優先して適用する）
-  if(th&&isSpecialOpenAt(ds,th,time)){
+  if(th&&isSpecialBusinessSlot(ds,th,time)){
     if(isLeaveForSlot(ds,th,time))return false;
     return true;
   }
@@ -1117,17 +1117,23 @@ function normalizeSpecialTimeSlot(raw){
 let specialDays=[]; // [{id,special_date,therapist,time_slot}]
 let confirmedSpecialDayIds={}; // {id: confirmed_at(JST)}
 function getSpecialTimesForDay(ds,therapist){
-  // 臨時営業日は「開始-終了」で保存される場合があるため、予約枠としては開始時刻だけを返す。
-  // 例：15:00-16:00 → 15:00（この枠は60分＝3単位として扱える）。
-  return specialDays
-    .filter(s=>s.special_date===ds&&s.therapist===therapist)
-    .map(s=>{
-      const raw=String(s.time_slot||'').trim();
-      const start=raw.split('-')[0].trim();
-      return normalizeTime(start);
-    })
-    .filter(Boolean)
-    .filter((v,i,a)=>a.indexOf(v)===i);
+  // 臨時営業日の予約枠は、登録した時間の「開始時刻」から40分（2単位）ごとに作る。
+  // 例：9:00-10:00 → 9:00 ／ 9:00-13:00 → 9:00, 9:40, 10:20, 11:00, 11:40, 12:20
+  // 「リハビリ時間設定」の通常の枠（9:10 など）は、臨時営業日の枠としては使わない。
+  // 開始時刻だけの登録（9:10 など）は、その時刻の1枠だけ。
+  const out=[];
+  specialDays.filter(s=>s.special_date===ds&&s.therapist===therapist).forEach(s=>{
+    const raw=String(s.time_slot||'').trim();
+    const parts=raw.split('-').map(v=>v.trim());
+    const start=normalizeTime(parts[0]);
+    if(!start)return;
+    out.push(start);
+    if(parts.length>=2&&parts[1]){
+      const end=timeMins(parts[1]);
+      for(let t=timeMins(start)+40;t+40<=end;t+=40)out.push(addMinutesToTime(start,t-timeMins(start)));
+    }
+  });
+  return out.filter((v,i,a)=>a.indexOf(v)===i);
 }
 function isSpecialBusinessSlot(ds,therapist,time){
   return getSpecialTimesForDay(ds,therapist).includes(normalizeTime(time));
