@@ -894,6 +894,12 @@ function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function monday(d){const r=new Date(d);r.setDate(r.getDate()-((d.getDay()+6)%7));return r;}
 function isHoliday(ds){return holidays.has(ds);}
 function isLeave(ds,th){return leaves[th]&&leaves[th].has(ds);}
+// その担当者が「全休」のPT休暇か（半休は含まない）
+function isLeaveFullDay(ds,th){
+  if(!th||!isLeave(ds,th))return false;
+  const lv=leaveData.find(l=>l.therapist===th&&l.leave_date===ds);
+  return !lv||(lv.half_type||'full')==='full';
+}
 
 // PT休暇が特定の時間枠に影響するかチェック
 function isLeaveForSlot(ds,th,time){
@@ -1944,12 +1950,15 @@ async function renderTopAvailabilityCalendar(){
     const isHolidayDay=(isHoliday(ds)||date.getDay()===0)&&!hasSpecialBusinessDay(ds,topCalTherapist); // 臨時営業日は休診日より優先
     const hasOpen=topCalHasOpen(ds,topCalTherapist);
     let cls='top-cal-cell';
-    if(isHolidayDay&&!hasOpen)cls+=' closed-day';
+    // 選択中の担当がPT休暇（全日）の日は、休診日と同じ「休」の表示にする
+    const ptLeaveDay=isLeaveFullDay(ds,topCalTherapist);
+    const isClosedLabel=isHolidayDay||ptLeaveDay;
+    if(isClosedLabel&&!hasOpen)cls+=' closed-day';
     else if(hasOpen)cls+=' open-day';
     if(ds===dateStr(TODAY))cls+=' today';
     if(ds===pubTargetDate)cls+=' selected';
     const clickable=hasOpen&&!isPast;
-    html+=`<div class="${cls}" ${clickable?`onclick="openPublicDate('${ds}','${topCalTherapist}')"`:''}>${d}${hasOpen?'<span style="font-size:9px;font-weight:600">空きあり</span>':(isHolidayDay?'<span style="font-size:8px">休</span>':'')}</div>`;
+    html+=`<div class="${cls}" ${clickable?`onclick="openPublicDate('${ds}','${topCalTherapist}')"`:''}>${d}${hasOpen?'<span style="font-size:9px;font-weight:600">空きあり</span>':(isClosedLabel?`<span style="font-size:8px">${ptLeaveDay&&!isHolidayDay?'休暇':'休'}</span>`:'')}</div>`;
   }
   const rem=(7-((first+dim)%7))%7;
   for(let i=1;i<=rem;i++)html+=`<div class="top-cal-cell other">${i}</div>`;
