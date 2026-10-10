@@ -1958,7 +1958,7 @@ async function renderTopAvailabilityCalendar(){
     if(ds===dateStr(TODAY))cls+=' today';
     if(ds===pubTargetDate)cls+=' selected';
     const clickable=hasOpen&&!isPast;
-    html+=`<div class="${cls}" ${clickable?`onclick="openPublicDate('${ds}','${topCalTherapist}')"`:''}>${d}${hasOpen?'<span style="font-size:9px;font-weight:600">空きあり</span>':(isClosedLabel?`<span style="font-size:8px">${ptLeaveDay&&!isHolidayDay?'休暇':'休'}</span>`:'')}</div>`;
+    html+=`<div class="${cls}" ${clickable?`onclick="openPublicDate('${ds}','${topCalTherapist}')"`:''}>${d}${hasOpen?'<span style="font-size:9px;font-weight:600">空きあり</span>':(isClosedLabel?`<span style="font-size:8px">休</span>`:'')}</div>`;
   }
   const rem=(7-((first+dim)%7))%7;
   for(let i=1;i<=rem;i++)html+=`<div class="top-cal-cell other">${i}</div>`;
