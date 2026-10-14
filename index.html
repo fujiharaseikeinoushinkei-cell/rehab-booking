@@ -3860,6 +3860,7 @@ let anPickQuery='';
 let anChecked=new Set();
 let anDoneCount=null;         // {患者ID: 実施済の回数}
 let anCancelNotifs=null;      // 患者自身のキャンセル通知（全期間）
+let anNoshowRows=[];          // 当日キャンセル（不在）の予約（全期間）
 let anCancelPid='';
 let anCancelShow=50;
 let anLogOpen=false;
@@ -3874,8 +3875,8 @@ function anEsc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;'
 async function anLoadDone(){
   const size=1000;let start=0,all=[];
   while(true){
-    const {data,error}=await sb.from('bookings').select('id,patient_id,booking_date,time_slot,therapist')
-      .eq('status','done').order('id',{ascending:true}).range(start,start+size-1);
+    const {data,error}=await sb.from('bookings').select('id,patient_id,booking_date,time_slot,therapist,status')
+      .in('status',['done','noshow']).order('id',{ascending:true}).range(start,start+size-1);
     if(error)throw error;
     const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
   }
@@ -3883,7 +3884,12 @@ async function anLoadDone(){
   const bySlot=new Map();
   all.forEach(b=>bySlot.set(`${b.booking_date}|${b.therapist}|${normalizeTime(b.time_slot)}`,b));
   const cnt={};
-  bySlot.forEach(b=>{if(b.patient_id)cnt[String(b.patient_id)]=(cnt[String(b.patient_id)]||0)+1;});
+  anNoshowRows=[];
+  bySlot.forEach(b=>{
+    if(!b.patient_id)return;
+    if(b.status==='done')cnt[String(b.patient_id)]=(cnt[String(b.patient_id)]||0)+1;
+    else if(b.status==='noshow'&&patients[String(b.patient_id)]&&!isTentativePatient(String(b.patient_id)))anNoshowRows.push(b);
+  });
   return cnt;
 }
 async function anLoadCancel(){
@@ -4006,22 +4012,34 @@ function anCancelSelect(id){anCancelPid=id;anCancelShow=50;anRenderCancelSearch(
 function anRenderCancel(){
   const sumEl=document.getElementById('an-cancel-summary');
   const listEl=document.getElementById('an-cancel-list');
-  const all=anCancelNotifs||[];
-  const list=anCancelPid?all.filter(n=>String(n.operator)===anCancelPid):all;
+  const jstDate=iso=>{const d=new Date(new Date(iso).getTime()+9*3600*1000);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());};
+  // ① 患者予約画面からのキャンセル（お知らせ「患者からの予約変更」の記録）／② 当日キャンセル（不在）の予約
+  const items=[];
+  (anCancelNotifs||[]).forEach(n=>items.push({kind:'cancel',pid:String(n.operator),ts:new Date(n.created_at).getTime(),date:jstDate(n.created_at),
+    html:`${anEsc(getOriginalNotificationText({text:n.message}))}<div class="notif-time">${fmtTime(n.created_at)}</div>`}));
+  (anNoshowRows||[]).forEach(b=>{
+    const d=parseLocalDate(b.booking_date),t=normalizeTime(b.time_slot),pid=String(b.patient_id);
+    items.push({kind:'noshow',pid,ts:d.getTime()+timeMins(t)*60000,date:d,
+      html:`${anEsc(patients[pid].name)}（${pid}）が ${d.getMonth()+1}/${d.getDate()} ${t} の予約に来られませんでした（当日キャンセル・不在）<div class="notif-time">予約日 ${d.getMonth()+1}/${d.getDate()}（${DAY_NAMES[d.getDay()]}）</div>`});
+  });
+  items.sort((a,b)=>b.ts-a.ts);
+  const list=anCancelPid?items.filter(x=>x.pid===anCancelPid):items;
+  const nCancel=list.filter(x=>x.kind==='cancel').length;
+  const nNoshow=list.filter(x=>x.kind==='noshow').length;
   const total=list.length;
-  // 月平均：患者を選んだときはリハビリ開始日から、全員のときは最初のキャンセル記録から今日まで
+  // 月平均：患者を選んだときはリハビリ開始日から、全員のときは最初の記録から今日まで
   let from=null,basis='';
   if(anCancelPid&&rehabStartDates[anCancelPid]){from=parseLocalDate(rehabStartDates[anCancelPid]);basis='リハビリ開始日から';}
-  else if(total){const oldest=list[list.length-1];from=new Date(new Date(oldest.created_at).getTime()+9*3600*1000);from=new Date(from.getUTCFullYear(),from.getUTCMonth(),from.getUTCDate());basis='最初のキャンセル記録から';}
+  else if(total){from=list.reduce((m,x)=>x.date<m?x.date:m,list[0].date);basis='最初の記録から';}
   let avgText='—';
   if(from){const days=Math.floor((TODAY-from)/864e5)+1;if(days>0)avgText=(total/Math.max(1,days/AN_DAYS_PER_MONTH)).toFixed(1)+'回/月';}
   const who=anCancelPid&&patients[anCancelPid]?`${anEsc(patients[anCancelPid].name)}さん`:'全員';
-  sumEl.innerHTML=`<div style="display:flex;gap:10px;margin:10px 0 8px"><div style="flex:1;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの合計回数（${who}）</div><div style="font-size:18px;font-weight:700">${total}回</div></div><div style="flex:1;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの月平均回数</div><div style="font-size:18px;font-weight:700">${avgText}</div><div style="font-size:10px;color:#8E8E93">${basis}</div></div></div>`;
+  sumEl.innerHTML=`<div style="display:flex;gap:10px;margin:10px 0 8px"><div style="flex:1.4;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの合計回数（${who}）</div><div style="font-size:18px;font-weight:700">${total}回</div><div style="font-size:10px;color:#3C3C43;line-height:1.5;margin-top:2px">うちわけ<br>患者予約画面からのキャンセル ${nCancel}回<br>＋ 当日キャンセル（不在） ${nNoshow}回</div></div><div style="flex:1;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの月平均回数</div><div style="font-size:18px;font-weight:700">${avgText}</div><div style="font-size:10px;color:#8E8E93">${basis}</div></div></div>`;
   if(!total){listEl.innerHTML='<div class="empty">キャンセルの履歴はありません</div>';return;}
   const shown=list.slice(0,anCancelShow);
-  listEl.innerHTML=shown.map(n=>`<div class="notif-item"><div class="notif-dot"></div><div class="notif-body">${anEsc(getOriginalNotificationText({text:n.message}))}<div class="notif-time">${fmtTime(n.created_at)}</div></div></div>`).join('')
+  listEl.innerHTML=shown.map(x=>`<div class="notif-item"><div class="notif-dot" ${x.kind==='noshow'?'style="background:#FF9500"':''}></div><div class="notif-body">${x.html}</div></div>`).join('')
     +(list.length>shown.length?`<div style="text-align:center;padding:8px 0"><button class="btn btn-sm" onclick="anCancelShow+=50;anRenderCancel()">さらに表示（残り${list.length-shown.length}件）</button></div>`:'')
-    +`<div style="font-size:10px;color:#8E8E93;margin-top:6px;line-height:1.5">お知らせの「患者からの予約変更」を削除（×／✓）しても、この履歴には残ります。</div>`;
+    +`<div style="font-size:10px;color:#8E8E93;margin-top:6px;line-height:1.5">お知らせの「患者からの予約変更」を削除（×／✓）しても、この履歴には残ります。オレンジの印は当日キャンセル（不在）で、予約日で集計します。</div>`;
 }
 
 // ---- 操作履歴（クリックで開く） ----
