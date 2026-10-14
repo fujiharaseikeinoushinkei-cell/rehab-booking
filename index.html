@@ -1488,8 +1488,16 @@ async function loadAllData(){
   specialDays=(spRes&&spRes.data)?spRes.data.map(s=>({...s,time_slot:normalizeSpecialTimeSlot(s.time_slot)})):[];
 }
 
+// DBの日時を Date にする。タイムゾーン表記（Z／+00:00など）がない値は、DBの保存どおり世界標準時(UTC)として読む。
+// （表記がないまま new Date() に渡すと、ブラウザの時刻として読まれて日本時間にならないため）
+function parseDbTime(iso){
+  const str=String(iso||'').trim();
+  if(!str)return new Date(NaN);
+  if(/(Z|[+-]\d{2}(:?\d{2})?)$/i.test(str.replace(/^\d{4}-\d{2}-\d{2}/,'')))return new Date(str);
+  return new Date(str.replace(' ','T')+'Z');
+}
 function fmtTime(iso){
-  try{const d=new Date(iso);return d.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}
+  try{const d=parseDbTime(iso);return d.toLocaleDateString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'})+' '+d.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}
 }
 
 function getPatientUpcoming(pid){
@@ -4012,10 +4020,10 @@ function anCancelSelect(id){anCancelPid=id;anCancelShow=50;anRenderCancelSearch(
 function anRenderCancel(){
   const sumEl=document.getElementById('an-cancel-summary');
   const listEl=document.getElementById('an-cancel-list');
-  const jstDate=iso=>{const d=new Date(new Date(iso).getTime()+9*3600*1000);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());};
+  const jstDate=iso=>{const d=new Date(parseDbTime(iso).getTime()+9*3600*1000);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());};
   // ① 患者予約画面からのキャンセル（お知らせ「患者からの予約変更」の記録）／② 当日キャンセル（不在）の予約
   const items=[];
-  (anCancelNotifs||[]).forEach(n=>items.push({kind:'cancel',pid:String(n.operator),ts:new Date(n.created_at).getTime(),date:jstDate(n.created_at),
+  (anCancelNotifs||[]).forEach(n=>items.push({kind:'cancel',pid:String(n.operator),ts:parseDbTime(n.created_at).getTime(),date:jstDate(n.created_at),
     html:`${anEsc(getOriginalNotificationText({text:n.message}))}<div class="notif-time">${fmtTime(n.created_at)}</div>`}));
   (anNoshowRows||[]).forEach(b=>{
     const d=parseLocalDate(b.booking_date),t=normalizeTime(b.time_slot),pid=String(b.patient_id);
@@ -5133,7 +5141,7 @@ async function renderActuals(){
     // キャンセル数は「お知らせ」→「患者からの予約変更」のうち、
     // 患者自身のキャンセル通知だけを1件=2単位として集計。
     const cancel=months.map(m=>cancelNotifs.filter(n=>{
-      const d=new Date(n.created_at);
+      const d=parseDbTime(n.created_at);
       const jst=new Date(d.getTime()+9*60*60*1000);
       const ym=`${jst.getUTCFullYear()}-${String(jst.getUTCMonth()+1).padStart(2,'0')}`;
       return ym===m.ym;
