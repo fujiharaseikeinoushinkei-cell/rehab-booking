@@ -350,7 +350,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       <div class="tab2" onclick="switchTab('a','slots',this)">リハビリ時間設定</div>
       <div class="tab2" onclick="switchTab('a','holidays',this)">休診日</div>
       <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
-      <div class="tab2" onclick="switchTab('a','logs',this)">操作ログ</div>
+      <div class="tab2" onclick="switchTab('a','logs',this)">分析</div>
       <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
       <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
       <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
@@ -573,10 +573,26 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="leave-list"></div>
   </div>
 
-  <!-- 操作ログ -->
+  <!-- 分析 -->
   <div class="pad pt-12" id="atab-logs" style="display:none">
-    <div style="font-size:14px;font-weight:600;margin-bottom:12px">操作履歴（直近50件）</div>
-    <div id="log-list"></div>
+    <div class="card" style="padding:12px;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">患者分析</div>
+      <div id="an-modes" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <div id="an-controls"></div>
+      <div id="an-table"></div>
+    </div>
+    <div class="card" style="padding:12px;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">キャンセル履歴</div>
+      <div id="an-cancel-search"></div>
+      <div id="an-cancel-summary"></div>
+      <div id="an-cancel-list"></div>
+    </div>
+    <div class="card" style="padding:12px">
+      <div onclick="anToggleLog()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:14px;font-weight:700">
+        <span>操作履歴（直近50件）</span><span id="an-log-arrow" style="font-size:12px;color:#8E8E93">▶ 開く</span>
+      </div>
+      <div id="log-list" style="display:none;margin-top:10px"></div>
+    </div>
   </div>
 
   <!-- 期限アラート -->
@@ -2042,7 +2058,7 @@ function switchTab(prefix,name,el){
   if(name==='holidays')renderHolidays();
   if(name==='slots'){populateStaffSelect('slot-th');renderSlotDefs();}
   if(name==='leaves'){populateStaffSelect('lv-th');renderLeaveFilterButtons();leaveFilter=staffList[0]?.id||'';renderLeaves(leaveFilter);}
-  if(name==='logs')renderLogs();
+  if(name==='logs')renderAnalysis(true);
   if(name==='deadline')renderDeadline();
   if(name==='settings'){renderSettingsDisplay();renderBusinessHoursTable();renderStaffListArea();populateExternalLinkInputs();populateStaffSelect('sp-th');renderSpecialDaysList();populateClinicSettingsInputs();populateBusinessTimeInputs();}
   if(name==='actuals'){renderActuals();}
@@ -3829,6 +3845,190 @@ async function renderLogs(){
     <span class="badge badge-blue" style="margin-right:6px">${l.action}</span>${l.detail||''}
     <div class="log-time">${fmtTime(l.created_at)} — ${l.operator}</div>
   </div>`).join('');
+}
+
+
+
+// ---- 分析（患者分析・キャンセル履歴・操作履歴） ----
+let anMode='search';          // search=患者検索 / therapist=担当別 / kana=アイウエオ順 / selected=選択した患者
+let anTherapist='';
+let anQuery='';
+let anPickQuery='';
+let anChecked=new Set();
+let anDoneCount=null;         // {患者ID: 実施済の回数}
+let anCancelNotifs=null;      // 患者自身のキャンセル通知（全期間）
+let anCancelPid='';
+let anCancelShow=50;
+let anLogOpen=false;
+const AN_DAYS_PER_MONTH=30.4375;
+
+function anPatientIds(){return Object.keys(patients).filter(id=>!isArchivedPatient(id)&&!isTentativePatient(id));}
+function anSortKana(a,b){return (patients[a].kana||patients[a].name).localeCompare(patients[b].kana||patients[b].name,'ja');}
+function anNorm(v){return String(v||'').replace(/[\s\u3000]/g,'').toLowerCase();}
+function anMatch(id,q){const k=anNorm(q);if(!k)return true;const p=patients[id];return anNorm(p.name).includes(k)||anNorm(p.kana).includes(k)||anNorm(id).includes(k);}
+function anEsc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function anLoadDone(){
+  const size=1000;let start=0,all=[];
+  while(true){
+    const {data,error}=await sb.from('bookings').select('id,patient_id,booking_date,time_slot,therapist')
+      .eq('status','done').order('id',{ascending:true}).range(start,start+size-1);
+    if(error)throw error;
+    const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
+  }
+  // 週間表・実績表と同じく、同じ日・担当・時間の枠は1回として数える
+  const bySlot=new Map();
+  all.forEach(b=>bySlot.set(`${b.booking_date}|${b.therapist}|${normalizeTime(b.time_slot)}`,b));
+  const cnt={};
+  bySlot.forEach(b=>{if(b.patient_id)cnt[String(b.patient_id)]=(cnt[String(b.patient_id)]||0)+1;});
+  return cnt;
+}
+async function anLoadCancel(){
+  const size=1000;let start=0,all=[];
+  while(true){
+    const {data,error}=await sb.from('notifications').select('id,message,created_at,operator')
+      .order('id',{ascending:true}).range(start,start+size-1);
+    if(error)throw error;
+    const rows=data||[];all.push(...rows);if(rows.length<size)break;start+=size;
+  }
+  // 患者自身のキャンセル通知だけ（管理者の操作・患者へのメッセージは除く）。通知を削除（×／✓）しても、この履歴には残る。
+  return all.filter(n=>n.operator&&n.operator!=='admin'&&n.operator!=='system'&&patients[String(n.operator)]
+    &&String(n.message||'').includes('キャンセル')&&!String(n.message||'').includes(PATIENT_MESSAGE_MARK))
+    .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))||b.id-a.id);
+}
+async function renderAnalysis(reload){
+  const tbl=document.getElementById('an-table');
+  if(reload||anDoneCount===null||anCancelNotifs===null){
+    tbl.innerHTML='<div class="empty" style="padding:16px">読み込み中...</div>';
+    try{
+      [anDoneCount,anCancelNotifs]=await Promise.all([anLoadDone(),anLoadCancel()]);
+    }catch(e){
+      console.error('分析データの取得に失敗しました',e);
+      tbl.innerHTML='<div class="empty" style="padding:16px;color:#FF3B30">データの取得に失敗しました。再読み込みしてください。</div>';
+      return;
+    }
+  }
+  anRenderModes();anRenderControls();anRenderTable();anRenderCancelSearch();anRenderCancel();
+  if(anLogOpen)renderLogs();
+}
+function anRenderModes(){
+  const el=document.getElementById('an-modes');
+  const chip=(m,label)=>`<button class="btn btn-sm" onclick="anSetMode('${m}')" style="${anMode===m?'background:#007AFF;color:#fff;border-color:#007AFF':'background:#fff;color:#000;border:1px solid #C7C7CC;box-shadow:none'}">${label}</button>`;
+  el.innerHTML=chip('search','患者検索')+chip('therapist','担当別')+chip('kana','アイウエオ順')+chip('selected','選択した患者');
+}
+function anSetMode(m){anMode=m;anRenderModes();anRenderControls();anRenderTable();}
+function anRenderControls(){
+  const el=document.getElementById('an-controls');
+  if(anMode==='search'){
+    el.innerHTML=`<div class="input-group" style="margin-bottom:8px"><input type="text" id="an-q" placeholder="名前・ふりがな・患者IDで検索" value="${anEsc(anQuery)}" oninput="anQuery=this.value;anRenderTable()" autocomplete="off"></div>`;
+  }else if(anMode==='therapist'){
+    if(!staffList.some(t=>t.id===anTherapist))anTherapist=staffList[0]?staffList[0].id:'';
+    el.innerHTML=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${staffList.map(t=>`<button class="btn btn-sm" onclick="anTherapist='${t.id}';anRenderControls();anRenderTable()" style="${anTherapist===t.id?'background:#007AFF;color:#fff;border-color:#007AFF':'background:#fff;color:#000;border:1px solid #C7C7CC;box-shadow:none'}">${t.name}</button>`).join('')}</div>`;
+  }else if(anMode==='selected'){
+    el.innerHTML=`<div style="font-size:12px;color:#8E8E93;margin-bottom:6px">患者の左側のチェックボックスにチェックを入れると、下の患者分析に表示されます。</div>
+      <div class="input-group" style="margin-bottom:6px"><input type="text" id="an-pq" placeholder="患者を絞り込み（名前・ふりがな・ID）" value="${anEsc(anPickQuery)}" oninput="anPickQuery=this.value;anRenderPicker()" autocomplete="off"></div>
+      <div id="an-pick" style="max-height:220px;overflow-y:auto;border:1px solid #E5E5EA;border-radius:10px;margin-bottom:10px"></div>`;
+    anRenderPicker();
+  }else{
+    el.innerHTML='';
+  }
+}
+function anRenderPicker(){
+  const box=document.getElementById('an-pick');
+  if(!box)return;
+  const ids=anPatientIds().filter(id=>anMatch(id,anPickQuery)).sort(anSortKana);
+  box.innerHTML=ids.length?ids.map(id=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #F2F2F7;font-size:13px;cursor:pointer"><input type="checkbox" ${anChecked.has(id)?'checked':''} onchange="anToggle('${id}',this.checked)"><span style="font-weight:600">${anEsc(patients[id].name)}</span><span style="font-size:11px;color:#8E8E93">${id}</span></label>`).join('')
+    :'<div style="font-size:12px;color:#8E8E93;padding:10px">該当する患者がいません</div>';
+}
+function anToggle(id,on){
+  if(on)anChecked.add(id);else anChecked.delete(id);
+  if(anMode==='selected')anRenderTable();else anRenderTable();
+}
+function anStats(pid){
+  const visits=(anDoneCount&&anDoneCount[String(pid)])||0;
+  const sd=rehabStartDates[String(pid)];
+  let days=null,avg=null;
+  if(sd){
+    const d=Math.floor((TODAY-parseLocalDate(sd))/864e5)+1;   // リハビリ開始日を1日目として数える
+    if(d>0){days=d;avg=visits/Math.max(1,d/AN_DAYS_PER_MONTH);}
+  }
+  return {visits,days,avg};
+}
+function anRenderTable(){
+  const el=document.getElementById('an-table');
+  let ids=[];let hint='';
+  if(anMode==='search'){
+    if(!anNorm(anQuery))hint='名前・ふりがな・患者IDを入力すると、該当する患者が表示されます。';
+    else ids=anPatientIds().filter(id=>anMatch(id,anQuery)).sort(anSortKana);
+  }else if(anMode==='therapist'){
+    ids=anPatientIds().filter(id=>patients[id].therapist===anTherapist).sort(anSortKana);
+  }else if(anMode==='kana'){
+    ids=anPatientIds().sort(anSortKana);
+  }else{
+    ids=anPatientIds().filter(id=>anChecked.has(id)).sort(anSortKana);
+    if(!ids.length)hint='上の一覧でチェックを入れた患者が、ここに表示されます。';
+  }
+  if(!ids.length){el.innerHTML=`<div style="font-size:12px;color:#8E8E93;padding:10px 2px">${hint||'該当する患者がいません'}</div>`;return;}
+  const th='style="background:#F2F2F7;padding:6px 8px;font-size:11px;font-weight:600;white-space:nowrap;border-bottom:1px solid #E5E5EA;text-align:left"';
+  const td='style="padding:6px 8px;font-size:12px;border-bottom:1px solid #F2F2F7;vertical-align:top"';
+  el.innerHTML=`<div style="font-size:11px;color:#8E8E93;margin-bottom:4px">${ids.length}名</div>
+    <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:520px">
+    <thead><tr><th ${th}></th><th ${th}>患者名</th><th ${th}>診断名</th><th ${th}>利用回数の合計</th><th ${th}>平均利用回数<br>（回/月）</th><th ${th}>利用期間<br>（開始日から）</th></tr></thead>
+    <tbody>${ids.map(id=>{
+      const p=patients[id],st=anStats(id);
+      return `<tr><td ${td}><input type="checkbox" ${anChecked.has(id)?'checked':''} onchange="anToggle('${id}',this.checked)"></td>
+        <td ${td}><span style="font-weight:600">${anEsc(p.name)}</span><div style="font-size:10px;color:#8E8E93">${id}${isEndedPatient(id)?' ／終了':''}</div></td>
+        <td ${td}>${anEsc(p.disease||'—')}</td>
+        <td ${td}>${st.visits}回</td>
+        <td ${td}>${st.avg==null?'—':st.avg.toFixed(1)+'回/月'}</td>
+        <td ${td}>${st.days==null?'—':st.days+'日'}</td></tr>`;}).join('')}</tbody></table></div>
+    <div style="font-size:10px;color:#8E8E93;margin-top:6px;line-height:1.5">利用回数＝「実施済」の回数。平均利用回数＝利用回数 ÷ （リハビリ開始日からの日数 ÷ 30.4375）。1か月に満たない場合は1か月として計算。利用期間は開始日を1日目として数えます。リハビリ開始日が未登録の患者は「—」です。</div>`;
+}
+
+// ---- キャンセル履歴 ----
+function anRenderCancelSearch(){
+  const el=document.getElementById('an-cancel-search');
+  const sel=anCancelPid&&patients[anCancelPid]?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 10px;background:#FFF3D6;border-radius:10px"><span style="flex:1;font-size:13px;font-weight:600">${anEsc(patients[anCancelPid].name)}<span style="font-size:11px;font-weight:400;color:#8E8E93;margin-left:6px">${anCancelPid}</span></span><button class="btn btn-sm" onclick="anCancelSelect('')">全員に戻す</button></div>`:'';
+  el.innerHTML=sel+`<div class="input-group" style="margin-bottom:0"><input type="text" id="an-cq" placeholder="患者検索（名前・ふりがな・患者ID）" oninput="anCancelSearch(this.value)" autocomplete="off"></div><div id="an-cancel-results"></div>`;
+}
+function anCancelSearch(q){
+  const box=document.getElementById('an-cancel-results');
+  const k=anNorm(q);
+  if(!k){box.innerHTML='';return;}
+  const hits=anPatientIds().filter(id=>anMatch(id,q)).sort(anSortKana).slice(0,8);
+  box.innerHTML=hits.length?hits.map(id=>`<div class="cal-pt-row" style="cursor:pointer" onclick="anCancelSelect('${id}')"><span style="font-weight:600">${anEsc(patients[id].name)}</span><span style="font-size:11px;color:#8E8E93">${id}</span></div>`).join('')
+    :'<div style="font-size:12px;color:#8E8E93;padding:8px 2px">該当する患者がいません</div>';
+}
+function anCancelSelect(id){anCancelPid=id;anCancelShow=50;anRenderCancelSearch();anRenderCancel();}
+function anRenderCancel(){
+  const sumEl=document.getElementById('an-cancel-summary');
+  const listEl=document.getElementById('an-cancel-list');
+  const all=anCancelNotifs||[];
+  const list=anCancelPid?all.filter(n=>String(n.operator)===anCancelPid):all;
+  const total=list.length;
+  // 月平均：患者を選んだときはリハビリ開始日から、全員のときは最初のキャンセル記録から今日まで
+  let from=null,basis='';
+  if(anCancelPid&&rehabStartDates[anCancelPid]){from=parseLocalDate(rehabStartDates[anCancelPid]);basis='リハビリ開始日から';}
+  else if(total){const oldest=list[list.length-1];from=new Date(new Date(oldest.created_at).getTime()+9*3600*1000);from=new Date(from.getUTCFullYear(),from.getUTCMonth(),from.getUTCDate());basis='最初のキャンセル記録から';}
+  let avgText='—';
+  if(from){const days=Math.floor((TODAY-from)/864e5)+1;if(days>0)avgText=(total/Math.max(1,days/AN_DAYS_PER_MONTH)).toFixed(1)+'回/月';}
+  const who=anCancelPid&&patients[anCancelPid]?`${anEsc(patients[anCancelPid].name)}さん`:'全員';
+  sumEl.innerHTML=`<div style="display:flex;gap:10px;margin:10px 0 8px"><div style="flex:1;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの合計回数（${who}）</div><div style="font-size:18px;font-weight:700">${total}回</div></div><div style="flex:1;background:#F2F2F7;border-radius:10px;padding:8px 10px"><div style="font-size:11px;color:#8E8E93">キャンセルの月平均回数</div><div style="font-size:18px;font-weight:700">${avgText}</div><div style="font-size:10px;color:#8E8E93">${basis}</div></div></div>`;
+  if(!total){listEl.innerHTML='<div class="empty">キャンセルの履歴はありません</div>';return;}
+  const shown=list.slice(0,anCancelShow);
+  listEl.innerHTML=shown.map(n=>`<div class="notif-item"><div class="notif-dot"></div><div class="notif-body">${anEsc(getOriginalNotificationText({text:n.message}))}<div class="notif-time">${fmtTime(n.created_at)}</div></div></div>`).join('')
+    +(list.length>shown.length?`<div style="text-align:center;padding:8px 0"><button class="btn btn-sm" onclick="anCancelShow+=50;anRenderCancel()">さらに表示（残り${list.length-shown.length}件）</button></div>`:'')
+    +`<div style="font-size:10px;color:#8E8E93;margin-top:6px;line-height:1.5">お知らせの「患者からの予約変更」を削除（×／✓）しても、この履歴には残ります。</div>`;
+}
+
+// ---- 操作履歴（クリックで開く） ----
+function anToggleLog(){
+  anLogOpen=!anLogOpen;
+  const body=document.getElementById('log-list');
+  const arrow=document.getElementById('an-log-arrow');
+  body.style.display=anLogOpen?'block':'none';
+  arrow.textContent=anLogOpen?'▼ 閉じる':'▶ 開く';
+  if(anLogOpen)renderLogs();
 }
 
 // ---- DEADLINE ----
