@@ -246,7 +246,7 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
       🔒 管理者ログイン
     </button>
     <div class="notice">⚠️ <strong>注意：</strong>診察日と同日にリハビリの予約を行うことはできません。</div>
-    <div id="top-external-links" style="display:none;gap:12px;justify-content:center;padding-top:8px"></div>
+    <div id="top-external-links" style="display:none;grid-template-columns:repeat(4,1fr);gap:8px;padding-top:8px"></div>
   </div>
 </div>
 
@@ -662,18 +662,11 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     </div>
 
     <div class="card">
-      <div style="font-size:14px;font-weight:600;margin-bottom:6px">外部リンク設定</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">外部リンク設定（最大4つ）</div>
       <p style="font-size:12px;color:#8E8E93;margin-bottom:12px;line-height:1.6">
-        トップページ下部に表示するボタンのリンク先を設定します。空欄のままにすると、そのボタンは表示されません。
+        トップページ下部に、アイコンが横に4つ並びます。表示名を空欄にしたリンクは表示されません。URLが空欄のリンクは、押すと「現在準備中です。」と表示されます。
       </p>
-      <div class="input-group">
-        <label>🏠 ホームページURL</label>
-        <input type="url" id="ext-homepage-url" placeholder="https://example.com" autocapitalize="none" autocomplete="off">
-      </div>
-      <div class="input-group">
-        <label>📷 InstagramのURL</label>
-        <input type="url" id="ext-instagram-url" placeholder="https://www.instagram.com/xxxxx" autocapitalize="none" autocomplete="off">
-      </div>
+      <div id="el-form"></div>
       <button class="btn btn-primary btn-block" onclick="saveExternalLinks()">保存する</button>
       <p id="ext-links-saved" style="font-size:13px;color:#34C759;margin-top:8px;display:none;text-align:center">✓ 保存しました</p>
     </div>
@@ -789,7 +782,15 @@ let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'t
 let bookingUnits={}; // {date:{staffId:{time:1|2}}} 1単位(20分)か2単位(40分/通常)かを記録
 let notifications=[];
 let settings={start:"",end:"",tstart:"",tend:""};
-let externalLinks={homepage:"",instagram:""};
+// ---- 外部リンク（最大4つ）：アイコン・表示名・URL ----
+let externalLinks=[
+  {label:'体づくり',url:'',icon:'💪'},
+  {label:'自主トレ',url:'',icon:'🏃'},
+  {label:'',url:'',icon:'🔗'},
+  {label:'',url:'',icon:'🔗'}
+];
+let externalLinksFromDb=false;                 // 新しい形式（external_links）が保存済みか
+const legacyLinks={homepage:'',instagram:''};  // 以前の「ホームページ」「Instagram」の設定（新しい設定を保存するまでは3つ目・4つ目に引き続き表示）
 let slotDefs=[];
 let holidays=new Set();
 let holidayData=[];   // 全休診日レコード（period情報含む）
@@ -1381,8 +1382,17 @@ async function loadAllData(){
         if(Array.isArray(parsed)&&parsed.length)staffList=parsed;
       }catch(e){console.warn('スタッフ一覧の読み込みに失敗しました',e);}
     }
-    if(r.key==='link_homepage')externalLinks.homepage=r.value||'';
-    if(r.key==='link_instagram')externalLinks.instagram=r.value||'';
+    if(r.key==='link_homepage')legacyLinks.homepage=r.value||'';
+    if(r.key==='link_instagram')legacyLinks.instagram=r.value||'';
+    if(r.key==='external_links'){
+      try{
+        const parsed=JSON.parse(r.value||'[]');
+        if(Array.isArray(parsed)){
+          externalLinks=[0,1,2,3].map(i=>({label:String((parsed[i]||{}).label||'').trim(),url:String((parsed[i]||{}).url||'').trim(),icon:String((parsed[i]||{}).icon||'').trim()||'🔗'}));
+          externalLinksFromDb=true;
+        }
+      }catch(e){console.warn('外部リンクの読み込みに失敗しました',e);}
+    }
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
     if(r.key==='confirmed_special_business_days'){
       // 確定済み臨時営業日（過去の臨時営業日一覧の履歴）を復元。これがないと再読み込みで「確定済み」が消える。
@@ -4700,6 +4710,7 @@ async function saveClinicName(){
   ]);
   document.getElementById('top-clinic-name').textContent=clinicName;
   renderTopSubtitle();
+  renderTopLinks();
   const msg=document.getElementById('cn-saved');msg.style.display='block';
   setTimeout(()=>msg.style.display='none',2000);
   updateLastUpdated();
@@ -4857,49 +4868,67 @@ async function deleteSpecialDay(id){
   renderWeekTable();
 }
 
+// 保存済みの設定。まだ新しい形式で保存していない場合は、以前のホームページ／Instagramを3つ目・4つ目として表示する。
+function getExternalLinks(){
+  if(externalLinksFromDb)return externalLinks;
+  const base=externalLinks.map(l=>({...l}));
+  if(legacyLinks.homepage)base[2]={label:'ホームページ',url:legacyLinks.homepage,icon:'🏠'};
+  if(legacyLinks.instagram)base[3]={label:'インスタ',url:legacyLinks.instagram,icon:'📷'};
+  return base;
+}
+function normalizeExternalUrl(u){
+  const t=String(u||'').trim();
+  if(!t)return '';
+  const withScheme=/^[a-z][a-z0-9+.-]*:/i.test(t)?t:'https://'+t;
+  return /^https?:\/\//i.test(withScheme)?withScheme:'';   // http(s) 以外（javascript: など）は使わない
+}
+// トップページ：表示名のあるリンクを、アイコン（横4列）で表示する
 function renderTopLinks(){
   const el=document.getElementById('top-external-links');
   if(!el)return;
-  const igIcon=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block">
-    <rect width="24" height="24" rx="6.5" fill="url(#igTopGradient)"/>
-    <rect x="4.5" y="4.5" width="15" height="15" rx="4" stroke="#fff" stroke-width="1.6"/>
-    <circle cx="12" cy="12" r="3.6" stroke="#fff" stroke-width="1.6"/>
-    <circle cx="16.8" cy="7.2" r="1" fill="#fff"/>
-    <defs>
-      <linearGradient id="igTopGradient" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#FEE411"/><stop offset="0.2" stop-color="#FB5936"/>
-        <stop offset="0.5" stop-color="#E31E7E"/><stop offset="0.8" stop-color="#B92FBF"/>
-        <stop offset="1" stop-color="#4238C9"/>
-      </linearGradient>
-    </defs>
-  </svg>`;
-  const links=[];
-  if(externalLinks.homepage)links.push({url:externalLinks.homepage,iconHtml:'<span style="font-size:20px">🏠</span>',label:'ホームページ'});
-  if(externalLinks.instagram)links.push({url:externalLinks.instagram,iconHtml:igIcon,label:'インスタ'});
-  if(!links.length){el.style.display='none';el.innerHTML='';return;}
-  el.style.display='flex';
-  el.innerHTML=links.map(l=>`
-    <a href="${l.url}" target="_blank" rel="noopener noreferrer" class="btn" style="flex:1;flex-direction:column;align-items:center;gap:2px;text-decoration:none;padding:12px 8px">
-      ${l.iconHtml}
-      <span style="font-size:12px">${l.label}</span>
-    </a>`).join('');
+  const items=getExternalLinks().map((l,i)=>({...l,i})).filter(l=>String(l.label||'').trim());
+  if(!items.length){el.style.display='none';el.innerHTML='';return;}
+  el.style.display='grid';
+  el.style.gridTemplateColumns='repeat(4,1fr)';
+  el.style.gap='8px';
+  el.innerHTML=items.map(l=>`<button onclick="openExternalLink(${l.i})" style="display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;padding:6px 2px;cursor:pointer;min-height:0;width:auto;box-shadow:none">
+    <span style="width:52px;height:52px;border-radius:14px;background:#fff;border:1px solid #E5E5EA;display:flex;align-items:center;justify-content:center;font-size:26px;box-shadow:0 1px 3px rgba(0,0,0,.08)">${anEsc(l.icon||'🔗')}</span>
+    <span style="font-size:11px;color:#1C1C1E;line-height:1.3;text-align:center;word-break:break-all">${anEsc(l.label)}</span></button>`).join('');
 }
+// クリック：URLがあれば別タブで開く。URLが空欄なら「現在準備中です。」を表示する
+function openExternalLink(i){
+  const l=getExternalLinks()[i];
+  if(!l)return;
+  const url=normalizeExternalUrl(l.url);
+  if(!url){
+    openModal(`<div style="text-align:center;padding:8px 4px"><div style="font-size:32px;margin-bottom:6px">${anEsc(l.icon||'🔗')}</div><div style="font-size:16px;font-weight:700;margin-bottom:10px">${anEsc(l.label)}</div><p style="font-size:15px;margin-bottom:16px">現在準備中です。</p><button class="btn btn-primary btn-block" onclick="closeModal()">閉じる</button></div>`);
+    return;
+  }
+  window.open(url,'_blank','noopener,noreferrer');
+}
+// 設定画面：4つ分の入力欄
 function populateExternalLinkInputs(){
-  const hp=document.getElementById('ext-homepage-url');
-  const ig=document.getElementById('ext-instagram-url');
-  if(hp)hp.value=externalLinks.homepage;
-  if(ig)ig.value=externalLinks.instagram;
+  const el=document.getElementById('el-form');
+  if(!el)return;
+  el.innerHTML=getExternalLinks().map((l,i)=>`<div style="border:1px solid #E5E5EA;border-radius:12px;padding:10px;margin-bottom:10px">
+    <div style="font-size:12px;font-weight:600;color:#8E8E93;margin-bottom:6px">リンク${i+1}</div>
+    <div style="display:grid;grid-template-columns:70px 1fr;gap:8px">
+      <div class="input-group" style="margin-bottom:0"><label>アイコン</label><input type="text" id="el-icon-${i}" value="${anEsc(l.icon||'')}" maxlength="4" placeholder="🔗" autocomplete="off"></div>
+      <div class="input-group" style="margin-bottom:0"><label>表示名</label><input type="text" id="el-label-${i}" value="${anEsc(l.label||'')}" placeholder="例：体づくり" autocomplete="off"></div>
+    </div>
+    <div class="input-group" style="margin:8px 0 0"><label>URL（空欄のときは「現在準備中です。」）</label><input type="url" id="el-url-${i}" value="${anEsc(l.url||'')}" placeholder="https://" autocapitalize="none" autocomplete="off"></div>
+  </div>`).join('');
 }
 async function saveExternalLinks(){
-  const hp=document.getElementById('ext-homepage-url').value.trim();
-  const ig=document.getElementById('ext-instagram-url').value.trim();
-  externalLinks.homepage=hp;
-  externalLinks.instagram=ig;
-  await Promise.all([
-    dbSaveSetting('link_homepage',hp),
-    dbSaveSetting('link_instagram',ig),
-  ]);
-  await dbLog('admin','save_external_links',`ホームページ：${hp||'未設定'} ／ Instagram：${ig||'未設定'}`);
+  const next=[0,1,2,3].map(i=>({
+    icon:String(document.getElementById('el-icon-'+i)?.value||'').trim()||'🔗',
+    label:String(document.getElementById('el-label-'+i)?.value||'').trim(),
+    url:String(document.getElementById('el-url-'+i)?.value||'').trim()
+  }));
+  externalLinks=next;
+  externalLinksFromDb=true;
+  await dbSaveSetting('external_links',JSON.stringify(next));
+  await dbLog('admin','save_external_links',next.filter(l=>l.label).map(l=>`${l.label}：${l.url||'未設定'}`).join(' ／ ')||'リンクなし');
   renderTopLinks();
   const msg=document.getElementById('ext-links-saved');
   msg.style.display='block';
@@ -5028,7 +5057,7 @@ async function saveBusinessHours(){
 // 既存の予約キャッシュ（直近期間）とは別に、年度データをSupabaseから取得して集計。
 // ============================================================
 let actualsBookingsCache=[];
-let actualsPriceSettings={rehab2:0,rehab3:0,plan:0,med1:0,med2:0};
+let actualsPriceSettings={rehab2:0,rehab3:0,plan:0,med1:0,med2:0,rehab2Label:'運動器Ⅱ'};
 
 function getCurrentFiscalYear(){return TODAY.getMonth()>=3?TODAY.getFullYear():TODAY.getFullYear()-1;}
 function reiwaYear(fy){return fy-2018;}
@@ -5109,13 +5138,16 @@ function arow(label,vals,cls=''){return `<tr class="${cls}"><td class="actuals-l
 function aheader(ms){return `<thead><tr><th class="actuals-label">実績項目</th>${ms.map(m=>`<th>${m.month}月</th>`).join('')}<th>平均</th></tr></thead>`;}
 
 async function loadActualsPriceSettings(){
-  const {data,error}=await sb.from('system_settings').select('key,value').in('key',['actuals_rehab2_unit_price','actuals_rehab3_unit_price']);
-  if(error)throw error;(data||[]).forEach(r=>{if(r.key==='actuals_rehab2_unit_price')actualsPriceSettings.rehab2=Number(r.value)||0;if(r.key==='actuals_rehab3_unit_price')actualsPriceSettings.rehab3=Number(r.value)||0;});
+  const {data,error}=await sb.from('system_settings').select('key,value').in('key',['actuals_rehab2_unit_price','actuals_rehab3_unit_price','actuals_rehab2_label']);
+  if(error)throw error;(data||[]).forEach(r=>{if(r.key==='actuals_rehab2_unit_price')actualsPriceSettings.rehab2=Number(r.value)||0;if(r.key==='actuals_rehab3_unit_price')actualsPriceSettings.rehab3=Number(r.value)||0;if(r.key==='actuals_rehab2_label'&&String(r.value||'').trim())actualsPriceSettings.rehab2Label=String(r.value).trim();});
 }
 async function saveActualsPriceSettings(){
   const ids=['actuals-price2'],keys=['actuals_rehab2_unit_price'];
   const vals=ids.map(id=>Number(document.getElementById(id)?.value||0));await Promise.all(keys.map((k,i)=>dbSaveSetting(k,String(vals[i]))));
-  actualsPriceSettings={rehab2:vals[0]};showToast('実績表の単価設定を保存しました','#34C759');renderActuals();
+  // 項目名は自由記載（空欄のときは「運動器Ⅱ」に戻す）。表の行名と単価欄の名称の両方に使う。
+  const label=String(document.getElementById('actuals-label2')?.value||'').trim()||'運動器Ⅱ';
+  await dbSaveSetting('actuals_rehab2_label',label);
+  actualsPriceSettings={...actualsPriceSettings,rehab2:vals[0],rehab2Label:label};showToast('実績表の単価設定を保存しました','#34C759');renderActuals();
 }
 function renderActualsFiscalYearSelect(){
   const el=document.getElementById('actuals-fy');if(!el)return;const cur=getCurrentFiscalYear();
@@ -5219,7 +5251,7 @@ async function renderActuals(){
       ${arow('新規患者数（介護保険なし）',nonCareNewP.map(afmt).concat(afmt(total(nonCareNewP)/12)))}
       ${arow('新規患者数（介護保険あり）',careNewP.map(afmt).concat(afmt(total(careNewP)/12)))}
       <tr class="section"><td colspan="${months.length+2}">リハビリテーション料（参考額）</td></tr>
-      ${arow('運動器Ⅱ',actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
+      ${arow(anEsc(actualsPriceSettings.rehab2Label||'運動器Ⅱ'),actual.map(v=>amoney(v*actualsPriceSettings.rehab2)).concat(amoney(total(actual)*actualsPriceSettings.rehab2/12)))}
       ${arow('リハビリテーション計画書料イ',months.map((m,i)=>amoney(nonCareNewP[i]*3000)).concat(amoney(total(nonCareNewP)*3000/12)))}
       ${arow('リハビリテーション計画書料ロ',months.map((m,i)=>amoney(Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400)).concat(amoney(months.reduce((s,m,i)=>s + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400,0)/12)))}
       ${arow('リハビリテーション計画書料２イ',months.map((m,i)=>amoney(carePlan2i[i]*2400)).concat(amoney(total(carePlan2i)*2400/12)))}
@@ -5228,9 +5260,10 @@ async function renderActuals(){
       ${arow('リハビリテーション料 月合計',months.map((m,i)=>amoney(actual[i]*actualsPriceSettings.rehab2 + nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960)).concat(amoney((total(actual)*actualsPriceSettings.rehab2 + months.reduce((s,m,i)=>s + nonCareNewP[i]*3000 + Math.max(0,nonCarePatients[i]-nonCareNewP[i])*2400 + carePlan2i[i]*2400 + carePlan2ro[i]*1960,0))/12)),'total')}
     </tbody></table></div>`;
     html+=`<div class="card" style="margin:0 16px 14px"><div style="font-size:14px;font-weight:700;margin-bottom:8px">💴 参考額の単価設定</div>
-      <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「運動器Ⅱ」の参考額に反映します。</div>
+      <div style="font-size:11px;color:#8E8E93;line-height:1.5;margin-bottom:10px">請求レセプトを自動取得するものではありません。単位単価を入力すると「${anEsc(actualsPriceSettings.rehab2Label||'運動器Ⅱ')}」の参考額に反映します。項目名は自由に変更できます。</div>
+      <div class="input-group" style="margin-bottom:8px"><label>項目名（自由記載）</label><input type="text" id="actuals-label2" value="${anEsc(actualsPriceSettings.rehab2Label||'運動器Ⅱ')}" placeholder="例：運動器Ⅱ" autocomplete="off"></div>
       <div style="display:grid;grid-template-columns:repeat(1,minmax(140px,1fr));gap:8px">
-      ${[['actuals-price2','運動器Ⅱ','rehab2']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
+      ${[['actuals-price2',anEsc(actualsPriceSettings.rehab2Label||'運動器Ⅱ'),'rehab2']].map(x=>`<div class="input-group" style="margin-bottom:0"><label>${x[1]}（円）</label><input type="number" id="${x[0]}" value="${actualsPriceSettings[x[2]]||''}" min="0"></div>`).join('')}
       </div><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveActualsPriceSettings()">単価を保存</button></div>`;
     body.innerHTML=html;
     document.getElementById('actuals-kpi').innerHTML=`<div class="metric"><div class="metric-label">年度</div><div class="metric-value">R${reiwaYear(fy)}</div><div class="metric-sub">${fy}/4〜${fy+1}/3</div></div><div class="metric"><div class="metric-label">年間実施単位</div><div class="metric-value">${afmt(tAct)}</div><div class="metric-sub">実施済のみ</div></div><div class="metric"><div class="metric-label">年間キャンセル</div><div class="metric-value">${afmt(tCan)}</div><div class="metric-sub">患者からのキャンセル</div></div><div class="metric"><div class="metric-label">新規患者</div><div class="metric-value">${afmt(tNew)}</div><div class="metric-sub">リハビリ開始日ベース</div></div>`;
@@ -5246,6 +5279,7 @@ async function init(){
     await ensureTentativePatients();
     document.getElementById('top-clinic-name').textContent=clinicName;
     renderTopSubtitle();
+  renderTopLinks();
     renderReminder();
     renderSettingsDisplay();
     renderTopLinks();
