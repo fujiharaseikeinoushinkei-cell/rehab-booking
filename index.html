@@ -338,16 +338,12 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         </div>
       </div>
 
-      <button class="tp-btn tp-btn-line" onclick="showScreen('s-admin-login')" style="padding:13px">
-        <span style="color:#5b7a99">🔒</span><span><b style="font-size:15px;font-weight:600">管理者ログイン</b></span><span class="tp-chev">›</span>
-      </button>
-
       <div class="tp-caution">⚠️ <strong>注意：</strong>診察日と同日にリハビリの予約を行うことはできません。</div>
 
       <div class="tp-links-card" id="top-links-card" style="display:none"><div id="top-external-links"></div></div>
 
       <div class="tp-foot">🌿　一人ひとりに寄り添うリハビリテーション　🌿
-        <small><span id="top-footer-name"></span> <span id="top-footer-tel"></span></small>
+        <small><span id="top-footer-name" role="button" tabindex="0" style="cursor:pointer" onclick="showScreen('s-admin-login')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showScreen('s-admin-login')}"></span> <span id="top-footer-tel"></span></small>
       </div>
     </main>
   </div>
