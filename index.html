@@ -295,20 +295,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
         <a href="tel:055-254-0511" style="color:#0369a1;text-decoration:none;font-weight:700">TEL.055-254-0511</a>
       </div>
 
-      <!-- 患者ID説明カード -->
-      <div class="tp-idcard">
-        <h3>🪪 患者IDについて</h3>
-        <div style="font-size:13px;color:#3b322b">患者IDは <strong>名前のイニシャル＋患者番号</strong> です</div>
-        <div class="tp-idrow">
-          <div class="tp-idbox">
-            <span class="gr">例）名前：</span>藤原 太郎<br>
-            <span class="gr">　　患者番号：</span>900001<br>
-            <span class="gr">　　→ 患者ID：</span><strong style="font-size:17px;color:#1f78c2;letter-spacing:1px">ft900001</strong>
-          </div>
-          <div class="tp-idnote"><span style="font-size:18px">🌱</span>はじめての方も<br>安心して<br>ご利用ください</div>
-        </div>
-      </div>
-
       <button class="tp-btn tp-btn-primary" onclick="showScreen('s-patient-login')">
         <span style="font-size:24px">🗓️</span><span><b>自分の予約を確認する。</b><small>患者IDでログイン</small></span><span class="tp-chev">›</span>
       </button>
@@ -387,11 +373,17 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   </div>
   <div style="padding:28px 24px;display:flex;flex-direction:column;align-items:center;gap:14px">
     <div style="font-size:44px">👤</div>
-    <div class="notice-blue" style="width:100%">
-      <strong>患者IDについて</strong><br>
-      名前の小文字イニシャル＋診察券番号<br>
-      例：山田 太郎（yt）＋ 診察券番号 235485<br>
-      　　→ 患者ID：<strong>yt235485</strong>
+    <div class="tp-idcard" style="width:100%;box-sizing:border-box">
+      <h3>🪪 患者IDについて</h3>
+      <div style="font-size:13px;color:#3b322b">患者IDは <strong>名前のイニシャル＋患者番号</strong> です</div>
+      <div class="tp-idrow">
+        <div class="tp-idbox">
+          <span class="gr">例）名前：</span>藤原 太郎<br>
+          <span class="gr">　　患者番号：</span>900001<br>
+          <span class="gr">　　→ 患者ID：</span><strong style="font-size:17px;color:#1f78c2;letter-spacing:1px">ft900001</strong>
+        </div>
+        <div class="tp-idnote"><span style="font-size:18px">🌱</span>はじめての方も<br>安心して<br>ご利用ください</div>
+      </div>
     </div>
     <input type="text" id="pid-input" placeholder="例：yt235485" style="font-size:18px;text-align:center;letter-spacing:1px" autocomplete="off" autocapitalize="none">
     <button class="btn btn-primary btn-block" onclick="patientLogin()" style="font-size:17px;padding:14px">ログイン</button>
