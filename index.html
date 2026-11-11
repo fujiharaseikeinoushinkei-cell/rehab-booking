@@ -2823,6 +2823,7 @@ function weekTableStatusModal(ds,therapist,time){
     <div class="modal-title">予約詳細</div>
     <p style="font-size:14px;font-weight:600;margin-bottom:4px">${m}月${day}日（${wd}） ${time}</p>
     <p style="font-size:13px;color:#8E8E93;margin-bottom:12px">${getStaffName(therapist)} ／ ${p?p.name:'不明'}</p>
+    ${status==='done'?`<button class="btn btn-block btn-primary" style="margin-bottom:14px" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','reserved')">予約状態に戻す</button>`:''}
     <div class="status-btns" style="margin-bottom:14px">
       <button class="btn btn-sm btn-green" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','done')" ${status==='done'?'disabled':''}>実施済</button>
       <button class="btn btn-sm btn-orange" onclick="wtUpdateStatus('${ds}','${therapist}','${time}','transfer')" ${status==='transfer'?'disabled':''}>振替</button>
@@ -2910,7 +2911,7 @@ async function wtUpdateStatus(ds,therapist,time,status){
   const r=await dbUpdateStatus(ds,therapist,time,status);
   if(!r.ok){showToast('更新に失敗しました');return;}
   const pName=await resolvePatientName(r.patientId);
-  const label={done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
+  const label={reserved:'予約状態',done:'実施済',transfer:'振替',cancelled:'キャンセル',noshow:'予約はあったが来なかった'}[status];
   await dbAddNotification(`${pName} ${ds} ${time} を「${label}」に変更【管理者】`,'admin');
   renderNotifications();
   await reloadBookings();
