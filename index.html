@@ -1399,6 +1399,16 @@ let rehabStartDates = {};
 let careInsurancePatients = {};
 // 患者ごとのリハビリ算定開始日（system_settingsで保持）
 let rehabBillingStartDates = {};
+// 期限超過後のリハビリ再開情報（system_settingsで保持）
+let rehabRestartPatients = {};
+// 患者ごとのリハビリ歴（system_settingsで保持）
+let rehabHistoryPatients = {};
+async function saveRehabRestartPatients(){
+  await dbSaveSetting('patient_rehab_restart_after_deadline', JSON.stringify(rehabRestartPatients));
+}
+async function saveRehabHistoryPatients(){
+  await dbSaveSetting('patient_rehab_history', JSON.stringify(rehabHistoryPatients));
+}
 async function saveRehabBillingStartDates(){
   await dbSaveSetting('patient_rehab_billing_start_dates', JSON.stringify(rehabBillingStartDates));
 }
@@ -1528,6 +1538,18 @@ async function loadAllData(){
         rehabBillingStartDates=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
       }catch(e){ rehabBillingStartDates={}; }
     }
+    if(r.key==='patient_rehab_restart_after_deadline'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        rehabRestartPatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ rehabRestartPatients={}; }
+    }
+    if(r.key==='patient_rehab_history'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        rehabHistoryPatients=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){ rehabHistoryPatients={}; }
+    }
     if(r.key==='last_updated'){
       try{
         const d=new Date(r.value);
@@ -1564,7 +1586,10 @@ async function loadAllData(){
       disease:p.disease||'',therapist:p.therapist||(staffList[0]?.id||''),
       deadline:p.deadline?new Date(p.deadline):new Date('2025-12-31'),
       rehabStartDate:rehabStartDates[String(p.id)]||'',
+      rehabBillingStartDate:rehabBillingStartDates[String(p.id)]||'',
       careInsurance:!!careInsurancePatients[String(p.id)],
+      rehabRestartAfterDeadline:rehabRestartPatients[String(p.id)]||{enabled:false,disease:'',restartDate:''},
+      rehabHistory:Array.isArray(rehabHistoryPatients[String(p.id)])?rehabHistoryPatients[String(p.id)]:[],
       note:p.note||'',history:[]};
   });
 
@@ -4305,6 +4330,33 @@ async function reregisterPatient(id){
   renderPatientList();updateLastUpdated();
   showToast(`${p.name}さんを患者管理に戻しました`,'#34C759');
 }
+function patientRehabHistoryRowHTML(prefix,item={}){
+  return `<div class=\"patient-rehab-history-row\" style=\"display:grid;grid-template-columns:1.2fr 1fr 1.2fr;gap:6px;margin-bottom:6px;\">
+    <input type=\"text\" data-history-diagnosis value=\"${anEsc(item.diagnosis||'')}\" placeholder=\"診断名\" style=\"min-width:0;padding:9px 8px;font-size:13px\">
+    <div style=\"display:flex;align-items:center;gap:3px;min-width:0\"><span style=\"flex-shrink:0;font-size:11px\">期間：</span><input type=\"date\" data-history-start value=\"${anEsc(item.startDate||'')}\" aria-label=\"期間開始日\" style=\"min-width:0;padding:9px 4px;font-size:12px\"><span style=\"flex-shrink:0;font-size:11px\">～</span><input type=\"date\" data-history-end value=\"${anEsc(item.endDate||'')}\" aria-label=\"期間終了日\" style=\"min-width:0;padding:9px 4px;font-size:12px\"></div>
+    <input type=\"text\" data-history-memo value=\"${anEsc(item.memo||'')}\" placeholder=\"メモ\" style=\"min-width:0;padding:9px 8px;font-size:13px\">
+  </div>`;
+}
+function addPatientRehabHistoryRow(prefix){
+  const box=document.getElementById(`${prefix}-rehab-history-rows`);
+  if(box)box.insertAdjacentHTML('beforeend',patientRehabHistoryRowHTML(prefix));
+}
+function collectPatientRehabHistory(prefix){
+  const box=document.getElementById(`${prefix}-rehab-history-rows`);
+  if(!box)return [];
+  return [...box.querySelectorAll('.patient-rehab-history-row')].map(row=>({
+    diagnosis:row.querySelector('[data-history-diagnosis]')?.value||'',
+    startDate:row.querySelector('[data-history-start]')?.value||'',
+    endDate:row.querySelector('[data-history-end]')?.value||'',
+    memo:row.querySelector('[data-history-memo]')?.value||''
+  })).filter(x=>x.diagnosis||x.startDate||x.endDate||x.memo);
+}
+function toggleRehabRestartFields(prefix){
+  const enabled=!!document.getElementById(`${prefix}-restart-enabled`)?.checked;
+  const fields=document.getElementById(`${prefix}-restart-fields`);
+  if(fields)fields.style.display=enabled?'block':'none';
+}
+
 function openAddPatient(){
   openModal(`<div class="modal-handle"></div>
     <div class="modal-title">＋ 新規患者登録</div>
@@ -4325,7 +4377,14 @@ function openAddPatient(){
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="np-rehab-billing-start" onchange="autoCalcNewPatientDeadline()"></div>
     <div class="input-group"><label>介護保険</label><select id="np-care-insurance"><option value="無" selected>無</option><option value="有">有</option></select></div>
     <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="np-dl" readonly></div>
+    <div class="input-group" style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:8px;color:#1C1C1E">期限越えでリハ再開 <input type="checkbox" id="np-restart-enabled" onchange="toggleRehabRestartFields('np')"></label>
+      <div id="np-restart-fields" style="display:none;padding-top:6px">
+        <div class="input-group"><label>疾患名</label><input type="text" id="np-restart-disease" placeholder="疾患名"></div>
+        <div class="input-group"><label>リハビリ再開日</label><input type="date" id="np-restart-date"></div>
+      </div>
+    </div>
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
+    <div class="input-group"><label>リハビリ歴</label><div id="np-rehab-history-rows">${patientRehabHistoryRowHTML('np')}</div><button type="button" class="btn btn-sm" onclick="addPatientRehabHistoryRow('np')">＋追加</button></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
     <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`);
 }
@@ -4367,9 +4426,13 @@ async function saveNewPatient(){
   const rehabStartDate=document.getElementById('np-rehab-start').value;
   const rehabBillingStartDate=document.getElementById('np-rehab-billing-start').value;
   const careInsurance=document.getElementById('np-care-insurance').value==='有';
+  const restartEnabled=document.getElementById('np-restart-enabled').checked;
+  if(restartEnabled&&!document.getElementById('np-restart-date').value){errEl.textContent='リハビリ再開日を入力してください';errEl.style.display='block';return;}
+  const rehabRestartAfterDeadline={enabled:restartEnabled,disease:restartEnabled?document.getElementById('np-restart-disease').value:'',restartDate:restartEnabled?document.getElementById('np-restart-date').value:''};
+  const rehabHistory=collectPatientRehabHistory('np');
   const newP={name,kana:document.getElementById('np-kana').value,dob:document.getElementById('np-dob').value,
     gender:document.getElementById('np-gender').value,disease:document.getElementById('np-disease').value,
-    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
+    therapist:document.getElementById('np-th').value,rehabStartDate,rehabBillingStartDate,careInsurance,rehabRestartAfterDeadline,rehabHistory,deadline:dl?new Date(dl):new Date('2025-12-31'),history:[],
     note:document.getElementById('np-note').value};
   const btn=document.getElementById('np-submit');btn.disabled=true;btn.textContent='登録中...';
   // 削除済み・終了済みの患者IDを再利用する場合は、既存の患者行を新しい内容で更新して通常一覧へ戻す
@@ -4383,9 +4446,13 @@ async function saveNewPatient(){
   rehabStartDates[String(id)]=rehabStartDate||'';
   rehabBillingStartDates[String(id)]=rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=careInsurance;
+  rehabRestartPatients[String(id)]=rehabRestartAfterDeadline;
+  rehabHistoryPatients[String(id)]=rehabHistory;
   await saveRehabStartDates();
   await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
+  await saveRehabRestartPatients();
+  await saveRehabHistoryPatients();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast(`${name} さんを登録しました`,'#34C759');
@@ -4404,7 +4471,14 @@ function openEditPatient(id){
     <div class="input-group"><label>リハビリ算定開始日</label><input type="date" id="ep-rehab-billing-start" value="${p.rehabBillingStartDate||''}" onchange="autoCalcEditPatientDeadline()"></div>
     <div class="input-group"><label>介護保険</label><select id="ep-care-insurance"><option value="無" ${p.careInsurance?'':'selected'}>無</option><option value="有" ${p.careInsurance?'selected':''}>有</option></select></div>
     <div class="input-group"><label>リハ期限（自動）</label><input type="date" id="ep-dl" value="${dl}" readonly></div>
+    <div class="input-group" style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:8px;color:#1C1C1E">期限越えでリハ再開 <input type="checkbox" id="ep-restart-enabled" ${p.rehabRestartAfterDeadline?.enabled?'checked':''} onchange="toggleRehabRestartFields('ep')"></label>
+      <div id="ep-restart-fields" style="display:${p.rehabRestartAfterDeadline?.enabled?'block':'none'};padding-top:6px">
+        <div class="input-group"><label>疾患名</label><input type="text" id="ep-restart-disease" value="${anEsc(p.rehabRestartAfterDeadline?.disease||'')}" placeholder="疾患名"></div>
+        <div class="input-group"><label>リハビリ再開日</label><input type="date" id="ep-restart-date" value="${anEsc(p.rehabRestartAfterDeadline?.restartDate||'')}"></div>
+      </div>
+    </div>
     <div class="input-group"><label>備考</label><input type="text" id="ep-note" value="${p.note||''}"></div>
+    <div class="input-group"><label>リハビリ歴</label><div id="ep-rehab-history-rows">${(Array.isArray(p.rehabHistory)&&p.rehabHistory.length?p.rehabHistory:[{}]).map(item=>patientRehabHistoryRowHTML('ep',item)).join('')}</div><button type="button" class="btn btn-sm" onclick="addPatientRehabHistoryRow('ep')">＋追加</button></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-block" onclick="closeModal()">キャンセル</button>
       <button class="btn btn-primary btn-block" id="ep-submit" onclick="saveEditPatient('${id}')">保存</button>
@@ -4418,12 +4492,15 @@ function autoCalcEditPatientDeadline(){
 
 async function saveEditPatient(id){
   const p=patients[id];
+  if(document.getElementById('ep-restart-enabled').checked&&!document.getElementById('ep-restart-date').value){showToast('リハビリ再開日を入力してください');return;}
   const updated={name:document.getElementById('ep-name').value.trim()||p.name,kana:document.getElementById('ep-kana').value,
     dob:document.getElementById('ep-dob').value,gender:document.getElementById('ep-gender').value,
     disease:document.getElementById('ep-disease').value,therapist:document.getElementById('ep-th').value,
     rehabStartDate:document.getElementById('ep-rehab-start').value,
     rehabBillingStartDate:document.getElementById('ep-rehab-billing-start').value,
     careInsurance:document.getElementById('ep-care-insurance').value==='有',
+    rehabRestartAfterDeadline:{enabled:document.getElementById('ep-restart-enabled').checked,disease:document.getElementById('ep-restart-enabled').checked?document.getElementById('ep-restart-disease').value:'',restartDate:document.getElementById('ep-restart-enabled').checked?document.getElementById('ep-restart-date').value:''},
+    rehabHistory:collectPatientRehabHistory('ep'),
     deadline:document.getElementById('ep-dl').value?new Date(document.getElementById('ep-dl').value):p.deadline,
     note:document.getElementById('ep-note').value};
   const btn=document.getElementById('ep-submit');btn.disabled=true;btn.textContent='保存中...';
@@ -4434,9 +4511,13 @@ async function saveEditPatient(id){
   rehabStartDates[String(id)]=updated.rehabStartDate||'';
   rehabBillingStartDates[String(id)]=updated.rehabBillingStartDate||'';
   careInsurancePatients[String(id)]=!!updated.careInsurance;
+  rehabRestartPatients[String(id)]=updated.rehabRestartAfterDeadline;
+  rehabHistoryPatients[String(id)]=updated.rehabHistory;
   await saveRehabStartDates();
   await saveRehabBillingStartDates();
   await saveCareInsurancePatients();
+  await saveRehabRestartPatients();
+  await saveRehabHistoryPatients();
   await dbLog('admin','edit_patient',`${updated.name}（${id}）を編集`);
   closeModal();renderPatientList();renderDeadline();updateLastUpdated();
   showToast('保存しました','#34C759');
@@ -5313,10 +5394,21 @@ async function renderActuals(){
       });
       return ids.size;
     });
-    // 計画書料２イ＝新規患者数（介護保険あり）× 2,400円
-    const carePlan2i=careNewP;
+    // 期限越えでリハ再開にチェックがある患者は、再開月に計画書料２イとして計上する。
+    // 計画書料２イ＝介護保険ありの新規患者＋期限越え再開患者（患者ID単位で重複を除外）
+    const carePlan2i=months.map((m,i)=>{
+      const ids=new Set(Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym)&&careInsurancePatients[String(pid)]).map(([pid])=>String(pid)));
+      Object.entries(rehabRestartPatients).forEach(([pid,v])=>{if(v?.enabled&&String(v.restartDate||'').startsWith(m.ym))ids.add(String(pid));});
+      return ids.size;
+    });
+    // ２ロの差し引きは、介護保険「有」の新規患者と、介護保険「有」の期限越え再開患者のみ。
+    const carePlan2iForCare=months.map(m=>{
+      const ids=new Set(Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym)&&careInsurancePatients[String(pid)]).map(([pid])=>String(pid)));
+      Object.entries(rehabRestartPatients).forEach(([pid,v])=>{if(v?.enabled&&careInsurancePatients[String(pid)]&&String(v.restartDate||'').startsWith(m.ym))ids.add(String(pid));});
+      return ids.size;
+    });
     // 計画書料２ロ＝（運動器患者数（介護保険あり）－ 新規患者数（介護保険あり））× 1,960円（差がマイナスなら0）
-    const carePlan2ro=months.map((m,i)=>Math.max(0,carePatients[i]-careNewP[i]));
+    const carePlan2ro=months.map((m,i)=>Math.max(0,carePatients[i]-carePlan2iForCare[i]));
 
     // 介護保険「なし」の運動器患者数・新規患者数を計算。
     // 運動器患者数は、その月に実施済となった患者のユニーク人数から介護保険「有」を除外。
@@ -5327,7 +5419,7 @@ async function renderActuals(){
       });
       return ids.size;
     });
-    const nonCareNewP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym) && !careInsurancePatients[String(pid)]).length);
+    const nonCareNewP=months.map(m=>Object.entries(rehabStartDates).filter(([pid,ds])=>String(ds||'').startsWith(m.ym) && !careInsurancePatients[String(pid)] && !rehabRestartPatients[String(pid)]?.enabled).length);
 
 
     const tav=staffList.map((t,ti)=>ta[ti].map((v,i)=>{const d=actualsPtBusinessDays(months[i].ym,t.id);return d?v/d:0;}));
