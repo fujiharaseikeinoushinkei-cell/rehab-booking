@@ -400,12 +400,10 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div id="p-banner" style="padding:8px 16px 0"></div>
   <div class="tab-bar" id="p-tabs">
     <div class="tab active" onclick="switchTab('p','mybook',this)">現在の予約確認</div>
-    <div class="tab" onclick="switchTab('p','messages',this)">メッセージ</div>
     <div class="tab" onclick="switchTab('p','reserve',this)">追加したい場合はこちら</div>
     <div class="tab" onclick="switchTab('p','history',this)">受診履歴</div>
   </div>
   <div class="pad pt-12" id="ptab-mybook"></div>
-  <div class="pad pt-12" id="ptab-messages" style="display:none"></div>
   <div id="ptab-reserve" style="display:none"></div>
   <div class="pad pt-12" id="ptab-history" style="display:none"></div>
 
@@ -469,23 +467,19 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div id="notif-list"></div>
     <div id="notif-empty" class="empty" style="display:none">✅ 未確認のお知らせはありません</div>
 
-    <!-- 患者とのメッセージ -->
+    <!-- 患者へメッセージ -->
     <div style="margin-top:22px;padding-top:16px;border-top:1px solid #E5E5EA">
-      <div style="font-size:15px;font-weight:600;margin-bottom:10px">💬 患者とのメッセージ</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">💬 患者へメッセージ</div>
       <div class="card" style="margin:0">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-          <button class="btn btn-sm" id="patient-message-select-btn" onclick="openPatientMessageModal()">患者選択・検索</button>
+          <button class="btn btn-sm" id="patient-message-select-btn" onclick="openPatientMessageModal()">患者を選択</button>
           <div id="patient-message-selected" style="font-size:13px;color:#8E8E93;flex:1">患者が選択されていません</div>
         </div>
-        <div id="staff-chat-history" style="background:#F2F2F7;border-radius:12px;padding:10px;min-height:120px;max-height:48vh;overflow-y:auto;margin-bottom:10px">
-          <div class="empty">患者を選択してください</div>
-        </div>
         <div class="input-group" style="margin-bottom:10px">
-          <label>患者への返信</label>
-          <textarea id="staff-chat-reply" rows="3" placeholder="患者への返信を自由に入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
+          <label>メッセージ（自由記載）</label>
+          <textarea id="patient-message-text" rows="4" placeholder="患者へ伝える内容を入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
         </div>
-        <button class="btn btn-primary btn-block" id="staff-chat-reply-btn" onclick="sendStaffChatReply()">返信</button>
-        <div class="notice" style="margin-top:10px">メッセージは×ボタンを押すことで、お互いのメッセージボックスから同時に消えます。また、一定の期間がたつとスタッフにより削除されます。</div>
+        <button class="btn btn-primary btn-block" id="patient-message-send-btn" onclick="sendPatientMessage()">送信</button>
       </div>
     </div>
   </div>
@@ -1897,7 +1891,7 @@ function renderPatientMessageSelected(){
   const btn=document.getElementById('patient-message-select-btn');
   const p=selectedPatientMessageId?patients[selectedPatientMessageId]:null;
   if(el)el.textContent=p?`${selectedPatientMessageId}：${p.name}`:'患者が選択されていません';
-  if(btn)btn.textContent='患者選択・検索';
+  if(btn)btn.textContent=p?'患者を変更':'患者を選択';
 }
 
 function openPatientMessageModal(){
@@ -1938,10 +1932,8 @@ function filterPatientMessageList(){renderPatientMessageList();}
 function selectPatientForMessage(id){
   if(!patients[id])return;
   selectedPatientMessageId=String(id);
-  staffChatSelectedPatientId=String(id);
   renderPatientMessageSelected();
   closeModal();
-  renderStaffChat();
 }
 
 async function sendPatientMessage(){
@@ -2182,7 +2174,7 @@ function showScreen(id){
   if(id==='s-top')topCalResetDisplay();
 }
 function switchTab(prefix,name,el){
-  const all=prefix==='p'?['mybook','messages','reserve','history']:
+  const all=prefix==='p'?['mybook','reserve','history']:
     ['notify','weektable','calendar','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
@@ -2194,9 +2186,8 @@ function switchTab(prefix,name,el){
   }
   el.classList.add('active');
   if(name==='mybook')renderMyBook();
-  if(name==='messages')renderPatientChat();
   if(name==='reserve')renderReserve();
-  if(name==='notify'){renderTodaySchedule();renderNotifications();renderStaffChat();}
+  if(name==='notify'){renderTodaySchedule();renderNotifications();}
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
   if(name==='patients')renderPatientList();
@@ -3218,7 +3209,7 @@ function patientLogin(){
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
     showScreen('s-patient');
     document.getElementById('p-tabs').querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===0));
-    ['mybook','messages','reserve','history'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
+    ['mybook','reserve','history'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
   } else {err.style.display='block';}
 }
 
@@ -3307,87 +3298,10 @@ function renderMyBook(){
   el.innerHTML=html;
 }
 
-const CHAT_NOTICE='＊リハビリスタッフ全員に届きます。基本的には予約に関する内容に限定した内容とします。相談メッセージも承りますが、回答はリハビリ時間内で行わせていただきます。';
-const CHAT_DELETE_NOTICE='メッセージは×ボタンを押すことで、お互いのメッセージボックスから同時に消えます。また、一定の期間がたつとスタッフにより削除されます。';
-let staffChatSelectedPatientId='';
-function chatTime(v){const d=new Date(v);return Number.isNaN(d.getTime())?'':`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}
-async function loadChatMessages(patientId=null){
-  let q=sb.from('rehab_messages').select('id,patient_id,sender,sender_name,message,created_at').order('created_at',{ascending:true});
-  if(patientId!==null)q=q.eq('patient_id',String(patientId));
-  const {data,error}=await q;
-  if(error){console.error('チャット取得失敗:',error);showToast('メッセージの取得に失敗しました');return null;}
-  return data||[];
-}
-async function renderPatientChat(){
-  const el=document.getElementById('ptab-messages');if(!el||!currentPid)return;
-  el.innerHTML=`<div style="font-size:17px;font-weight:700;margin-bottom:10px">リハビリスタッフへのメッセージ</div>
-    <div class="notice" style="margin-bottom:10px">${CHAT_NOTICE}</div>
-    <div id="patient-chat-history" style="background:#F2F2F7;border-radius:12px;padding:10px;min-height:180px;max-height:48vh;overflow-y:auto;margin-bottom:10px"></div>
-    <div style="display:flex;gap:8px;align-items:flex-end"><textarea id="patient-chat-input" rows="2" placeholder="メッセージを入力してください" style="flex:1;resize:vertical"></textarea><button class="btn btn-primary" onclick="sendPatientChatMessage()">送信</button></div>
-    <div class="notice" style="margin-top:10px">メッセージは×ボタンを押すことで、お互いのメッセージボックスから同時に消えます。また、一定の期間がたつとスタッフにより削除されます。</div>`;
-  await refreshPatientChat();
-}
-async function refreshPatientChat(){
-  if(!currentPid)return;
-  const box=document.getElementById('patient-chat-history');if(!box)return;
-  const rows=await loadChatMessages(currentPid);if(!rows)return;
-  box.innerHTML=rows.length?rows.map(m=>{
-    const mine=m.sender==='patient';
-    return `<div style="display:flex;justify-content:${mine?'flex-end':'flex-start'};margin:7px 0;gap:5px;align-items:flex-end">
-      ${mine?`<button class="notif-delete" title="双方から削除" onclick="deleteChatMessage('${m.id}')">×</button>`:''}
-      <div style="max-width:82%;background:${mine?'#D1F0DF':'#fff'};border-radius:12px;padding:9px 11px;white-space:pre-wrap;overflow-wrap:anywhere"><div style="font-size:14px">${escapeChatHtml(m.message)}</div><div style="font-size:10px;color:#8E8E93;text-align:right;margin-top:4px">${mine?'あなた':escapeChatHtml(m.sender_name||'リハビリスタッフ')}　${chatTime(m.created_at)}</div></div>
-      ${!mine?`<button class="notif-delete" title="双方から削除" onclick="deleteChatMessage('${m.id}')">×</button>`:''}
-    </div>`;
-  }).join(''):'<div class="empty">メッセージはまだありません</div>';
-  box.scrollTop=box.scrollHeight;
-}
-function escapeChatHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-async function sendPatientChatMessage(){
-  if(!currentPid)return;
-  const input=document.getElementById('patient-chat-input');const message=String(input?.value||'').trim();
-  if(!message){showToast('メッセージを入力してください');return;}
-  const {error}=await sb.from('rehab_messages').insert({patient_id:String(currentPid),sender:'patient',sender_name:patients[currentPid]?.name||'患者',message});
-  if(error){console.error('患者メッセージ送信失敗:',error);showToast('送信に失敗しました');return;}
-  input.value='';await refreshPatientChat();
-}
-async function deleteChatMessage(id){
-  if(!confirm('このメッセージを双方のメッセージボックスから削除しますか？'))return;
-  const {error}=await sb.from('rehab_messages').delete().eq('id',id).eq('patient_id',String(currentPid||staffChatSelectedPatientId));
-  if(error){console.error('メッセージ削除失敗:',error);showToast('削除に失敗しました');return;}
-  if(currentPid)await refreshPatientChat();
-  if(getCurrentActor()==='admin')await renderStaffChat();
-}
-async function renderStaffChat(){
-  const el=document.getElementById('staff-chat-history');if(!el)return;
-  const pid=staffChatSelectedPatientId;
-  if(!pid){el.innerHTML='<div class="empty">患者を選択してください</div>';return;}
-  const rows=await loadChatMessages(pid);if(!rows)return;
-  el.innerHTML=rows.length?rows.map(m=>{
-    const fromPatient=m.sender==='patient';
-    return `<div style="display:flex;justify-content:${fromPatient?'flex-start':'flex-end'};margin:7px 0;gap:5px;align-items:flex-end">
-      ${fromPatient?`<div style="max-width:82%;background:#fff;border-radius:12px;padding:9px 11px;white-space:pre-wrap;overflow-wrap:anywhere"><div style="font-size:14px">${escapeChatHtml(m.message)}</div><div style="font-size:10px;color:#8E8E93;text-align:right;margin-top:4px">患者　${chatTime(m.created_at)}</div></div><button class="notif-delete" title="双方から削除" onclick="deleteChatMessage('${m.id}')">×</button>`:`<button class="notif-delete" title="双方から削除" onclick="deleteChatMessage('${m.id}')">×</button><div style="max-width:82%;background:#D1F0DF;border-radius:12px;padding:9px 11px;white-space:pre-wrap;overflow-wrap:anywhere"><div style="font-size:14px">${escapeChatHtml(m.message)}</div><div style="font-size:10px;color:#8E8E93;text-align:right;margin-top:4px">リハビリスタッフ　${chatTime(m.created_at)}</div></div>`}
-    </div>`;
-  }).join(''):'<div class="empty">この患者とのメッセージはまだありません</div>';
-  el.scrollTop=el.scrollHeight;
-}
-function selectStaffChatPatient(pid){
-  staffChatSelectedPatientId=String(pid);
-  selectedPatientMessageId=String(pid);
-  renderPatientMessageSelected();
-  renderStaffChat();
-}
-async function sendStaffChatReply(){
-  if(getCurrentActor()!=='admin'||!staffChatSelectedPatientId){showToast('返信する患者を選択してください');return;}
-  const input=document.getElementById('staff-chat-reply');const message=String(input?.value||'').trim();if(!message){showToast('メッセージを入力してください');return;}
-  const {error}=await sb.from('rehab_messages').insert({patient_id:staffChatSelectedPatientId,sender:'staff',sender_name:'リハビリスタッフ',message});
-  if(error){console.error('スタッフ返信失敗:',error);showToast('返信に失敗しました');return;}
-  input.value='';await renderStaffChat();showToast('返信しました');
-}
-
 function switchTabByName(name){
   const tabBar=document.getElementById('p-tabs');
   const tabs=tabBar.querySelectorAll('.tab');
-  const nameMap={'mybook':0,'messages':1,'reserve':2,'history':3};
+  const nameMap={'mybook':0,'reserve':1,'history':2};
   const idx=nameMap[name];
   if(idx!==undefined) tabs[idx].click();
 }
