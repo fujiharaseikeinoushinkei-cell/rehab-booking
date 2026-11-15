@@ -1858,6 +1858,7 @@ async function dbAddNotification(text, operator=null){
 }
 
 const PATIENT_MESSAGE_MARK='【患者へメッセージ】';
+const PATIENT_TO_ADMIN_MESSAGE_MARK='【患者からのメッセージ】';
 let selectedPatientMessageId='';
 
 async function dbAddPatientMessage(patientId,text){
@@ -1884,6 +1885,24 @@ async function dbAddPatientMessage(patientId,text){
 
 function getPatientMessageText(n){
   return String(n?.text||'').replace(new RegExp('^'+PATIENT_MESSAGE_MARK.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*'),'').trim();
+}
+
+async function sendPatientToAdminMessage(){
+  if(!currentPid || getCurrentActor()!==String(currentPid)){
+    showToast('患者IDでログインしてください');
+    return;
+  }
+  const input=document.getElementById('patient-admin-message-text');
+  const btn=document.getElementById('patient-admin-message-send-btn');
+  const msg=String(input?.value||'').trim();
+  if(!msg){showToast('メッセージを入力してください');return;}
+  if(btn){btn.disabled=true;btn.textContent='送信中...';}
+  const ok=await dbAddNotification(`${PATIENT_TO_ADMIN_MESSAGE_MARK}\n${msg}`);
+  if(btn){btn.disabled=false;btn.textContent='送信';}
+  if(!ok){showToast('メッセージの送信に失敗しました');return;}
+  if(input)input.value='';
+  renderMyBook();
+  showToast('管理者へメッセージを送信しました','#34C759');
 }
 
 function renderPatientMessageSelected(){
@@ -3295,6 +3314,16 @@ function renderMyBook(){
       <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
     </div>`;
   }
+  html+=`<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E5E5EA">
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">💬 管理者へメッセージ</div>
+    <div class="card" style="margin:0">
+      <div class="input-group" style="margin-bottom:10px">
+        <label>メッセージ（自由記載）</label>
+        <textarea id="patient-admin-message-text" rows="4" placeholder="管理者へ伝える内容を入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
+      </div>
+      <button class="btn btn-primary btn-block" id="patient-admin-message-send-btn" onclick="sendPatientToAdminMessage()">送信</button>
+    </div>
+  </div>`;
   el.innerHTML=html;
 }
 
@@ -3555,7 +3584,7 @@ function getCurrentActor(){
   if(currentActorType === 'patient' && currentActorPatientId) return currentActorPatientId;
   return null;
 }
-let notifShowCount={patient:5,admin:5};
+let notifShowCount={patient:5,admin:5,patientMessage:5};
 // 管理画面の「患者からの予約変更」で ✓／× を押して非表示にした通知ID。
 // 患者画面に表示されるメッセージ（承認返信など）には影響させないため、DBの dismissed は変更せず system_settings に保持する。
 let adminHiddenNotifIds=new Set();
@@ -3610,7 +3639,8 @@ function renderNotifications(){
   const patientIds = new Set(Object.keys(patients||{}).map(String));
   const patientNotifs=notifications.filter(n=>isPatientBookingChange(n)&&!adminHiddenNotifIds.has(String(n.id)));
   const adminNotifs=notifications.filter(n=>n.operator==='admin');
-  const total=patientNotifs.length+adminNotifs.length;
+  const patientMessages=notifications.filter(n=>n.operator!=='admin' && patientIds.has(String(n.operator)) && String(n.text||'').includes(PATIENT_TO_ADMIN_MESSAGE_MARK));
+  const total=patientNotifs.length+adminNotifs.length+patientMessages.length;
   cnt.textContent=total;
   cnt.style.display=total?'inline-flex':'none';
   empty.style.display=total?'none':'block';
@@ -3645,12 +3675,30 @@ function renderNotifications(){
     return html;
   }
 
+  const patientMessageHtml=patientMessages.length
+    ? patientMessages.slice(0,notifShowCount.patientMessage).map(n=>{
+        const pid=String(n.operator);
+        const patientName=patients[pid]?.name||'患者名不明';
+        const body=String(n.text||'').replace(PATIENT_TO_ADMIN_MESSAGE_MARK,'').trim();
+        return `<div class="notif-item" id="ni-${n.id}">
+          <div class="notif-dot"></div>
+          <div class="notif-body"><div style="font-weight:600;margin-bottom:3px">${escapeHtml(patientName)}（${escapeHtml(pid)}）</div><div style="white-space:pre-wrap">${escapeHtml(body)}</div><div class="notif-time">${escapeHtml(n.time)}</div></div>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:12px;color:#C7C7CC;padding:8px 0;text-align:center">なし</div>`;
+  const patientMessageRemaining=Math.min(patientMessages.length-notifShowCount.patientMessage,20-notifShowCount.patientMessage);
+  const patientMessageMore=patientMessageRemaining>0
+    ? `<div style="text-align:center;padding:8px 0"><button class="btn btn-sm" onclick="notifShowMore('patientMessage')">さらに表示（残り${patientMessageRemaining}件）</button></div>`
+    : '';
+
   el.innerHTML=`
     <div style="font-size:12px;font-weight:600;color:#007AFF;margin-bottom:6px">👤 患者からの予約変更</div>
     <div id="notif-patient">${buildList(patientNotifs,'patient',notifShowCount.patient)}</div>
     <hr style="border:none;border-top:1.5px solid #E5E5EA;margin:12px 0">
     <div style="font-size:12px;font-weight:600;color:#5E35B1;margin-bottom:6px">🛡 管理者による操作</div>
-    <div id="notif-admin">${buildList(adminNotifs,'admin',notifShowCount.admin)}</div>`;
+    <div id="notif-admin">${buildList(adminNotifs,'admin',notifShowCount.admin)}</div>
+    <div style="font-size:12px;font-weight:600;color:#007AFF;margin:12px 0 6px">💬 患者からのメッセージ</div>
+    <div id="notif-patient-messages">${patientMessageHtml}${patientMessageMore}</div>`;
 }
 
 function notifShowMore(type){
