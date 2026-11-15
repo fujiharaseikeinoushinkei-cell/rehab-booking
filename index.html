@@ -1902,7 +1902,7 @@ async function sendPatientToAdminMessage(){
   if(!ok){showToast('メッセージの送信に失敗しました');return;}
   if(input)input.value='';
   renderMyBook();
-  showToast('管理者へメッセージを送信しました','#34C759');
+  showToast('リハビリスタッフへの相談メッセージを送信しました','#34C759');
 }
 
 function renderPatientMessageSelected(){
@@ -3315,11 +3315,12 @@ function renderMyBook(){
     </div>`;
   }
   html+=`<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E5E5EA">
-    <div style="font-size:15px;font-weight:600;margin-bottom:10px">💬 管理者へメッセージ</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:6px">💬 リハビリスタッフへの相談メッセージ</div>
+    <div style="font-size:12px;color:#8E8E93;margin-bottom:10px">＊全リハビリスタッフが閲覧可能です。返信は担当者が行います</div>
     <div class="card" style="margin:0">
       <div class="input-group" style="margin-bottom:10px">
         <label>メッセージ（自由記載）</label>
-        <textarea id="patient-admin-message-text" rows="4" placeholder="管理者へ伝える内容を入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
+        <textarea id="patient-admin-message-text" rows="4" placeholder="リハビリスタッフへ相談したい内容を入力してください" style="width:100%;resize:vertical;box-sizing:border-box"></textarea>
       </div>
       <button class="btn btn-primary btn-block" id="patient-admin-message-send-btn" onclick="sendPatientToAdminMessage()">送信</button>
     </div>
@@ -3683,6 +3684,7 @@ function renderNotifications(){
         return `<div class="notif-item" id="ni-${n.id}">
           <div class="notif-dot"></div>
           <div class="notif-body"><div style="font-weight:600;margin-bottom:3px">${escapeHtml(patientName)}（${escapeHtml(pid)}）</div><div style="white-space:pre-wrap">${escapeHtml(body)}</div><div class="notif-time">${escapeHtml(n.time)}</div></div>
+          <button class="notif-delete" type="button" title="このメッセージを削除" aria-label="このメッセージを削除" onclick="deletePatientToAdminMessage(${Number(n.id)})">×</button>
         </div>`;
       }).join('')
     : `<div style="font-size:12px;color:#C7C7CC;padding:8px 0;text-align:center">なし</div>`;
@@ -3699,6 +3701,21 @@ function renderNotifications(){
     <div id="notif-admin">${buildList(adminNotifs,'admin',notifShowCount.admin)}</div>
     <div style="font-size:12px;font-weight:600;color:#007AFF;margin:12px 0 6px">💬 患者からのメッセージ</div>
     <div id="notif-patient-messages">${patientMessageHtml}${patientMessageMore}</div>`;
+}
+
+async function deletePatientToAdminMessage(id){
+  if(getCurrentActor()!=='admin'){showToast('管理者ログイン中のみ削除できます');return;}
+  const target=notifications.find(n=>String(n.id)===String(id));
+  if(!target || !String(target.text||'').includes(PATIENT_TO_ADMIN_MESSAGE_MARK)){
+    showToast('削除対象のメッセージが見つかりません');return;
+  }
+  if(!confirm('この患者メッセージを削除しますか？'))return;
+  const {error}=await sb.from('notifications').delete().eq('id',id);
+  if(error){console.error('患者メッセージ削除失敗:',error);showToast('メッセージの削除に失敗しました');return;}
+  notifications=notifications.filter(n=>String(n.id)!==String(id));
+  await dbLog('admin','delete_patient_message',`${target.operator}：患者からのメッセージを削除`);
+  renderNotifications();
+  showToast('患者メッセージを削除しました','#34C759');
 }
 
 function notifShowMore(type){
