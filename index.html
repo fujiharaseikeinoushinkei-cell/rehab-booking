@@ -1906,6 +1906,30 @@ async function sendPatientToAdminMessage(){
   showToast('リハビリスタッフへの相談メッセージを送信しました','#34C759');
 }
 
+async function deletePatientSentMessage(id){
+  if(!currentPid || getCurrentActor()!==String(currentPid)){
+    showToast('患者IDでログインしてください');
+    return;
+  }
+  const target=notifications.find(n=>String(n.id)===String(id));
+  if(!target || String(target.operator)!==String(currentPid) || !String(target.text||'').includes(PATIENT_TO_ADMIN_MESSAGE_MARK)){
+    showToast('削除対象のメッセージが見つかりません');
+    return;
+  }
+  if(!confirm('この送信メッセージを削除しますか？'))return;
+  const {data,error}=await sb.from('notifications').delete()
+    .eq('id',id).eq('operator',String(currentPid)).select('id');
+  if(error || !data || !data.length){
+    console.error('送信メッセージの削除失敗:',error);
+    showToast('メッセージの削除に失敗しました');
+    return;
+  }
+  notifications=notifications.filter(n=>String(n.id)!==String(id));
+  await dbLog(String(currentPid),'delete_patient_sent_message','患者から送信した相談メッセージを削除');
+  renderPatientMessages();
+  showToast('送信メッセージを削除しました','#34C759');
+}
+
 function renderPatientMessageSelected(){
   const el=document.getElementById('patient-message-selected');
   const btn=document.getElementById('patient-message-select-btn');
@@ -3266,12 +3290,12 @@ function renderMyBook(){
   if(!el)return;
 
   let html='';
+  html+=`<div style="margin-bottom:16px">
+    <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
+  </div>`;
   html+='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
   if(!upcoming.length){
-    html+=`<div class="empty">📅 現在、予約はありません</div>
-    <div style="margin-top:16px">
-      <button class="btn btn-primary btn-block" onclick="switchTabByName('reserve')">空き枠を確認して予約する</button>
-    </div>`;
+    html+='<div class="empty">📅 現在、予約はありません</div>';
   } else {
     upcoming.forEach(u=>{
       const d=parseLocalDate(u.date);
@@ -3291,9 +3315,6 @@ function renderMyBook(){
         </div>
       </div>`;
     });
-    html+=`<div style="margin-top:8px">
-      <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
-    </div>`;
   }
   el.innerHTML=html;
 }
@@ -3311,6 +3332,9 @@ function renderPatientMessages(){
     .map(n=>({id:n.id,text:getPatientMessageText(n),time:n.time,kind:'message'}))
     .filter(x=>x.text);
   const staffItems=[...staffReplies,...directMessages].slice(0,20);
+  const sentMessages=notifications
+    .filter(n=>String(n.operator)===String(currentPid) && String(n.text||'').includes(PATIENT_TO_ADMIN_MESSAGE_MARK))
+    .slice(0,20);
   let html='';
   html+='<div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>';
   if(staffItems.length){
@@ -3319,6 +3343,19 @@ function renderPatientMessages(){
       <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div></div>
       <button class="notif-delete" title="通知を削除" onclick="dismissStaffReply('${r.id}')">×</button>
     </div>`).join('');
+  }
+  html+='<div style="margin-top:18px;font-size:15px;font-weight:700;margin-bottom:8px">メッセージの送信歴</div>';
+  if(sentMessages.length){
+    html+=sentMessages.map(n=>{
+      const body=String(n.text||'').replace(PATIENT_TO_ADMIN_MESSAGE_MARK,'').trim();
+      return `<div class="card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">${body}</div>
+        <div style="font-size:11px;color:#8E8E93;margin-top:4px">${n.time||''}</div></div>
+        <button class="notif-delete" type="button" title="送信メッセージを削除" aria-label="送信メッセージを削除" onclick="deletePatientSentMessage('${n.id}')">×</button>
+      </div>`;
+    }).join('');
+  }else{
+    html+='<div style="font-size:12px;color:#8E8E93;padding:6px 0 10px">送信したメッセージはありません</div>';
   }
   html+=`<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E5E5EA">
     <div style="font-size:15px;font-weight:600;margin-bottom:6px">💬 リハビリスタッフへの相談メッセージ</div>
