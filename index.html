@@ -400,7 +400,6 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <div id="p-banner" style="padding:8px 16px 0"></div>
   <div class="tab-bar" id="p-tabs">
     <div class="tab active" onclick="switchTab('p','mybook',this)">現在の予約確認</div>
-    <div class="tab" onclick="switchTab('p','reserve',this)">追加したい場合はこちら</div>
     <div class="tab" onclick="switchTab('p','history',this)">受診履歴</div>
     <div class="tab" onclick="switchTab('p','messages',this)">メッセージ</div>
   </div>
@@ -3227,7 +3226,8 @@ function patientLogin(){
     currentPid=id;
     setActor('patient', currentPid);err.style.display='none';
     document.getElementById('p-welcome').textContent=patients[id].name+' さん';
-    document.getElementById('p-id-sub').textContent=id;
+    const patientInfo=patients[id];
+    document.getElementById('p-id-sub').innerHTML=`${escapeHtml(id)}　｜　診断名：${escapeHtml(patientInfo.disease||'未設定')}　｜　リハビリ期限：${escapeHtml(formatPatientDeadline(patientInfo.deadline))}`;
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
     showScreen('s-patient');
     document.getElementById('p-tabs').querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===0));
