@@ -402,10 +402,12 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div class="tab active" onclick="switchTab('p','mybook',this)">現在の予約確認</div>
     <div class="tab" onclick="switchTab('p','reserve',this)">追加したい場合はこちら</div>
     <div class="tab" onclick="switchTab('p','history',this)">受診履歴</div>
+    <div class="tab" onclick="switchTab('p','messages',this)">メッセージ</div>
   </div>
   <div class="pad pt-12" id="ptab-mybook"></div>
   <div id="ptab-reserve" style="display:none"></div>
   <div class="pad pt-12" id="ptab-history" style="display:none"></div>
+  <div class="pad pt-12" id="ptab-messages" style="display:none"></div>
 
 </div>
 
@@ -1901,7 +1903,7 @@ async function sendPatientToAdminMessage(){
   if(btn){btn.disabled=false;btn.textContent='送信';}
   if(!ok){showToast('メッセージの送信に失敗しました');return;}
   if(input)input.value='';
-  renderMyBook();
+  renderPatientMessages();
   showToast('リハビリスタッフへの相談メッセージを送信しました','#34C759');
 }
 
@@ -2193,7 +2195,7 @@ function showScreen(id){
   if(id==='s-top')topCalResetDisplay();
 }
 function switchTab(prefix,name,el){
-  const all=prefix==='p'?['mybook','reserve','history']:
+  const all=prefix==='p'?['mybook','reserve','history','messages']:
     ['notify','weektable','calendar','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
@@ -2205,6 +2207,7 @@ function switchTab(prefix,name,el){
   }
   el.classList.add('active');
   if(name==='mybook')renderMyBook();
+  if(name==='messages')renderPatientMessages();
   if(name==='reserve')renderReserve();
   if(name==='notify'){renderTodaySchedule();renderNotifications();}
   if(name==='weektable')renderWeekTable();
@@ -3228,7 +3231,7 @@ function patientLogin(){
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
     showScreen('s-patient');
     document.getElementById('p-tabs').querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===0));
-    ['mybook','reserve','history'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
+    ['mybook','reserve','history','messages'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
   } else {err.style.display='block';}
 }
 
@@ -3254,7 +3257,7 @@ async function dismissStaffReply(id){
   ids.add(String(id));
   try{localStorage.setItem('staffReplyDismissed_'+String(currentPid),JSON.stringify(Array.from(ids)));}catch(e){console.warn('担当者通知の削除状態を保存できません',e);}
   notifications=notifications.filter(n=>String(n.id)!==String(id));
-  renderMyBook();
+  renderPatientMessages();
 }
 
 function renderMyBook(){
@@ -3262,29 +3265,7 @@ function renderMyBook(){
   const el=document.getElementById('ptab-mybook');
   if(!el)return;
 
-  // 管理者が承認した「キャンセル・追加」の確認メッセージを、現在の予約一覧の上に表示する。
-  const dismissedStaffReplies=getDismissedStaffReplyIds(currentPid);
-  const staffReplies=notifications
-    .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n) && !dismissedStaffReplies.has(String(n.id)))
-    .map(n=>({id:n.id,text:getStaffReplyText(n),time:n.time,kind:'reply'}))
-    .filter(x=>x.text);
-  const directMessages=notifications
-    .filter(n=>String(n.operator)===String(currentPid) && String(n.text||'').includes(PATIENT_MESSAGE_MARK) && !dismissedStaffReplies.has(String(n.id)))
-    .map(n=>({id:n.id,text:getPatientMessageText(n),time:n.time,kind:'message'}))
-    .filter(x=>x.text);
-  const staffItems=[...staffReplies,...directMessages].slice(0,20);
-
   let html='';
-  if(staffItems.length){
-    html+=`<div style="margin-bottom:14px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>
-      ${staffItems.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px;display:flex;align-items:center;gap:10px">
-        <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">${r.text}</div>
-        <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div></div>
-        <button class="notif-delete" title="通知を削除" onclick="dismissStaffReply('${r.id}')">×</button>
-      </div>`).join('')}
-    </div>`;
-  }
   html+='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
   if(!upcoming.length){
     html+=`<div class="empty">📅 現在、予約はありません</div>
@@ -3314,6 +3295,31 @@ function renderMyBook(){
       <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
     </div>`;
   }
+  el.innerHTML=html;
+}
+
+function renderPatientMessages(){
+  const el=document.getElementById('ptab-messages');
+  if(!el)return;
+  const dismissedStaffReplies=getDismissedStaffReplyIds(currentPid);
+  const staffReplies=notifications
+    .filter(n=>String(n.operator)===String(currentPid) && isApprovedNotification(n) && !dismissedStaffReplies.has(String(n.id)))
+    .map(n=>({id:n.id,text:getStaffReplyText(n),time:n.time,kind:'reply'}))
+    .filter(x=>x.text);
+  const directMessages=notifications
+    .filter(n=>String(n.operator)===String(currentPid) && String(n.text||'').includes(PATIENT_MESSAGE_MARK) && !dismissedStaffReplies.has(String(n.id)))
+    .map(n=>({id:n.id,text:getPatientMessageText(n),time:n.time,kind:'message'}))
+    .filter(x=>x.text);
+  const staffItems=[...staffReplies,...directMessages].slice(0,20);
+  let html='';
+  html+='<div style="font-size:15px;font-weight:700;margin-bottom:8px">担当者より</div>';
+  if(staffItems.length){
+    html+=staffItems.map(r=>`<div class="card" style="border-left:4px solid #007AFF;background:#F7FBFF;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+      <div style="flex:1;min-width:0"><div style="font-size:14px;line-height:1.6;white-space:pre-wrap">${r.text}</div>
+      <div style="font-size:11px;color:#8E8E93;margin-top:4px">${r.time}</div></div>
+      <button class="notif-delete" title="通知を削除" onclick="dismissStaffReply('${r.id}')">×</button>
+    </div>`).join('');
+  }
   html+=`<div style="margin-top:20px;padding-top:16px;border-top:1px solid #E5E5EA">
     <div style="font-size:15px;font-weight:600;margin-bottom:6px">💬 リハビリスタッフへの相談メッセージ</div>
     <div style="font-size:12px;color:#8E8E93;margin-bottom:10px">＊全リハビリスタッフが閲覧可能です。返信は担当者が行います</div>
@@ -3331,7 +3337,7 @@ function renderMyBook(){
 function switchTabByName(name){
   const tabBar=document.getElementById('p-tabs');
   const tabs=tabBar.querySelectorAll('.tab');
-  const nameMap={'mybook':0,'reserve':1,'history':2};
+  const nameMap={'mybook':0,'reserve':1,'history':2,'messages':3};
   const idx=nameMap[name];
   if(idx!==undefined) tabs[idx].click();
 }
