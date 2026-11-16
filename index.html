@@ -3291,7 +3291,7 @@ function renderMyBook(){
 
   let html='';
   html+=`<div style="margin-bottom:16px">
-    <button class="btn btn-block" onclick="switchTabByName('reserve')" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
+    <button class="btn btn-block" onclick="navigateToTopAvailabilityCalendar()" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
   </div>`;
   html+='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
   if(!upcoming.length){
@@ -3377,6 +3377,14 @@ function switchTabByName(name){
   const nameMap={'mybook':0,'reserve':1,'history':2,'messages':3};
   const idx=nameMap[name];
   if(idx!==undefined) tabs[idx].click();
+}
+
+function navigateToTopAvailabilityCalendar(){
+  // 患者マイページからトップ画面へ戻り、空き状況カレンダーを開く。
+  showScreen('s-top');
+  topCalShow();
+  const calendar=document.getElementById('top-availability-calendar');
+  if(calendar)calendar.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 function renderBanner(){
