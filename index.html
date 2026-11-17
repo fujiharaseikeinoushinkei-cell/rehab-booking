@@ -3292,6 +3292,7 @@ function renderMyBook(){
   let html='';
   html+=`<div style="margin-bottom:16px">
     <button class="btn btn-block" onclick="navigateToTopAvailabilityCalendar()" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
+    ${isOverDeadline(currentPid)?'<div style="margin-top:8px;font-size:13px;color:#D97706;text-align:center">リハビリ期限を超えたため、最大月６回までとなります</div>':''}
   </div>`;
   html+='<div style="font-size:15px;font-weight:600;margin-bottom:12px">現在の予約一覧</div>';
   if(!upcoming.length){
