@@ -2723,6 +2723,7 @@ function weekTableBookModal(ds,therapist,time){
       <label>🔁 登録方法</label>
       <select id="wt-auto">
         <option value="">今回のみ（${time}に登録）</option>
+        <option value="reference">参考予約（今回のみ登録）</option>
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
         ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
         ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
@@ -2807,6 +2808,7 @@ async function weekTableDoBook(ds,therapist,time){
   // 「1単位」を選んだ場合は、実際に登録する時間を選択に応じて前半／後半に切り替える
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
+  const isReference=auto==='reference';
   const isHalf=auto==='half_1'||auto==='half_2';
   const isThreeUnits=auto==='three_units';
   const isFourUnits=auto==='four_units';
@@ -2829,13 +2831,13 @@ async function weekTableDoBook(ds,therapist,time){
   }
 
   btn.disabled=true;btn.textContent='処理中...';
-  const r=await dbBookSlot(ds,therapist,normTime,pid,unit,false,true); // 管理者の予約
+  const r=await dbBookSlot(ds,therapist,normTime,pid,unit,isReference,true); // 管理者の予約／参考予約
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
   const d=parseLocalDate(ds);
   const unitNote=isHalf?'【1単位】':(isThreeUnits?'【3単位・60分】':(isFourUnits?'【4単位・80分】':''));
-  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
+  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に${isReference?'参考予約':'予約'}【管理者】`,'admin');
 
   // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
   let autoCount=0;
@@ -2866,7 +2868,7 @@ async function weekTableDoBook(ds,therapist,time){
   if(autoCount>0){
     showToast(`${p.name} さんの予約を登録。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
   } else {
-    showToast(`${p.name} さんの予約を登録しました`,'#34C759');
+    showToast(isReference?`${p.name} さんの参考予約を登録しました`:`${p.name} さんの予約を登録しました`,'#34C759');
   }
 }
 
