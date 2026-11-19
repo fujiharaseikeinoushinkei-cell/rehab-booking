@@ -172,6 +172,21 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   .actuals-table{font-size:9px!important}.actuals-table th,.actuals-table td{padding:3px 4px!important}
   .actuals-table .actuals-label{position:static!important}.card{box-shadow:none!important}
 }
+
+#patient-print-area{display:none}
+@media print{
+  @page{size:A4 landscape;margin:7mm}
+  body:has(#patient-print-area .patient-print-table) *{visibility:hidden!important}
+  body:has(#patient-print-area .patient-print-table) #patient-print-area,
+  body:has(#patient-print-area .patient-print-table) #patient-print-area *{visibility:visible!important}
+  body:has(#patient-print-area .patient-print-table) #patient-print-area{display:block!important;position:absolute!important;left:0!important;top:0!important;width:100%!important}
+  .patient-print-title{font-size:12pt;font-weight:700;margin:0 0 3mm}
+  .patient-print-title span{font-size:8pt;font-weight:400}
+  .patient-print-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:7pt;line-height:1.0}
+  .patient-print-table th,.patient-print-table td{border:0.3pt solid #777;padding:var(--patient-print-cell-padding,0.4mm 0.7mm);text-align:left;overflow-wrap:anywhere}
+  .patient-print-table th{background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .patient-print-table th:nth-child(1){width:9%}.patient-print-table th:nth-child(2){width:10%}.patient-print-table th:nth-child(3){width:12%}.patient-print-table th:nth-child(4){width:9%}.patient-print-table th:nth-child(5){width:4%}.patient-print-table th:nth-child(6){width:17%}.patient-print-table th:nth-child(7){width:8%}.patient-print-table th:nth-child(8){width:9%}.patient-print-table th:nth-child(9){width:10%}.patient-print-table th:nth-child(10){width:12%}
+}
 </style>
 </head>
 <body>
@@ -402,11 +417,13 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
     <div class="tab active" onclick="switchTab('p','mybook',this)">現在の予約確認</div>
     <div class="tab" onclick="switchTab('p','history',this)">受診履歴</div>
     <div class="tab" onclick="switchTab('p','messages',this)">メッセージ</div>
+    <div class="tab" onclick="switchTab('p','notes',this)">ノート</div>
   </div>
   <div class="pad pt-12" id="ptab-mybook"></div>
   <div id="ptab-reserve" style="display:none"></div>
   <div class="pad pt-12" id="ptab-history" style="display:none"></div>
   <div class="pad pt-12" id="ptab-messages" style="display:none"></div>
+  <div class="pad pt-12" id="ptab-notes" style="display:none"></div>
 
 </div>
 
@@ -532,14 +549,20 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   <!-- スケジュール -->
   <!-- 患者管理 -->
   <div class="pad pt-12" id="atab-patients" style="display:none">
-    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn btn-primary btn-sm" onclick="openAddPatient()">＋ 新規登録</button>
-      <button class="btn btn-sm" onclick="openExcelImport()">📋 CSV取込</button>
-      <button class="btn btn-sm btn-green" onclick="exportCSV()">⬇ CSV出力</button>
-      <button class="btn btn-sm" id="ended-list-btn" onclick="toggleEndedPatientList()">終了一覧</button>
+    <div id="patient-management-menu" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="showPatientManagementPage('list',this)">患者一覧</button>
+      <button class="btn btn-sm" onclick="showPatientManagementPage('new',this)">新規登録</button>
+      <button class="btn btn-sm" onclick="showPatientManagementPage('ended',this)">終了一覧</button>
+      <button class="btn btn-sm" onclick="showPatientManagementPage('print',this)">印刷</button>
     </div>
-    <div id="patient-list"></div>
-    <div id="ended-patient-list" style="display:none"></div>
+    <div id="patient-page-list"><div id="patient-list"></div></div>
+    <div id="patient-page-new" style="display:none"><div id="patient-new-form"></div></div>
+    <div id="patient-page-ended" style="display:none"><div id="ended-patient-list"></div></div>
+    <div id="patient-page-print" style="display:none">
+      <div style="margin-bottom:12px"><button class="btn btn-primary btn-sm" onclick="printPatientList()">🖨 A4で印刷</button></div>
+      <div style="font-size:12px;color:#8E8E93">現在の患者一覧をA4用紙1枚に印刷します。</div>
+    </div>
+    <div id="patient-print-area"></div>
   </div>
 
   <!-- 基本表（旧「過去の予約を指定の月に反映」は削除） -->
@@ -869,6 +892,7 @@ let clinicName="藤原整形外科リハビリ予約";
 let topSubtitleText="当日キャンセルは電話をお願いします。";
 let clinicPhone="055-254-0511";
 let patients={};
+let patientMypageNotes={}; // 患者マイページのURL・文章ノート（患者IDごと）
 let bookings={};       // {date:{staffId:{time:pid|null}, ...}}
 let bookingStatuses={}; // {date:{staffId:{time:'reserved'|'done'|'cancelled'|'transfer'}}}
 let bookingUnits={}; // {date:{staffId:{time:1|2}}} 1単位(20分)か2単位(40分/通常)かを記録
@@ -1494,6 +1518,12 @@ async function loadAllData(){
           externalLinksFromDb=true;
         }
       }catch(e){console.warn('外部リンクの読み込みに失敗しました',e);}
+    }
+    if(r.key==='patient_mypage_notes'){
+      try{
+        const parsed=JSON.parse(r.value||'{}');
+        patientMypageNotes=(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))?parsed:{};
+      }catch(e){patientMypageNotes={};console.warn('患者ノートの読み込みに失敗しました',e);}
     }
     if(r.key==='basic_booking_patterns'){ window.__basicBookingPatternsRaw=r.value||''; }
     if(r.key==='confirmed_special_business_days'){
@@ -2218,7 +2248,7 @@ function showScreen(id){
   if(id==='s-top')topCalResetDisplay();
 }
 function switchTab(prefix,name,el){
-  const all=prefix==='p'?['mybook','reserve','history','messages']:
+  const all=prefix==='p'?['mybook','reserve','history','messages','notes']:
     ['notify','weektable','calendar','patients','booking','slots','holidays','leaves','logs','deadline','settings','actuals'];
   all.forEach(t=>{const e=document.getElementById(prefix+'tab-'+t);if(e)e.style.display='none';});
   const t=document.getElementById(prefix+'tab-'+name);if(t)t.style.display='block';
@@ -2231,11 +2261,12 @@ function switchTab(prefix,name,el){
   el.classList.add('active');
   if(name==='mybook')renderMyBook();
   if(name==='messages')renderPatientMessages();
+  if(name==='notes')renderPatientMypageNotes();
   if(name==='reserve')renderReserve();
   if(name==='notify'){renderTodaySchedule();renderNotifications();}
   if(name==='weektable')renderWeekTable();
   if(name==='calendar')renderCal();
-  if(name==='patients')renderPatientList();
+  if(name==='patients'){showPatientManagementPage('list',document.querySelector('#patient-management-menu .btn'));}
   if(name==='booking')renderBasicBookingTable();
   if(name==='holidays')renderHolidays();
   if(name==='slots'){populateStaffSelect('slot-th');renderSlotDefs();}
@@ -2723,7 +2754,6 @@ function weekTableBookModal(ds,therapist,time){
       <label>🔁 登録方法</label>
       <select id="wt-auto">
         <option value="">今回のみ（${time}に登録）</option>
-        <option value="reference">参考予約（今回のみ登録）</option>
         ${isBaseSlot?`<option value="monthly">同月分すべて自動登録（${time}）</option>`:''}
         ${baseTaken?'':`<option value="half_1">1単位（${baseTime}）</option>`}
         ${secondTaken?'':`<option value="half_2">1単位（${secondTime}）</option>`}
@@ -2808,7 +2838,6 @@ async function weekTableDoBook(ds,therapist,time){
   // 「1単位」を選んだ場合は、実際に登録する時間を選択に応じて前半／後半に切り替える
   const baseTime=getBaseSlotTime(ds,therapist,time);
   const secondTime=getSecondUnitTime(baseTime);
-  const isReference=auto==='reference';
   const isHalf=auto==='half_1'||auto==='half_2';
   const isThreeUnits=auto==='three_units';
   const isFourUnits=auto==='four_units';
@@ -2831,13 +2860,13 @@ async function weekTableDoBook(ds,therapist,time){
   }
 
   btn.disabled=true;btn.textContent='処理中...';
-  const r=await dbBookSlot(ds,therapist,normTime,pid,unit,isReference,true); // 管理者の予約／参考予約
+  const r=await dbBookSlot(ds,therapist,normTime,pid,unit,false,true); // 管理者の予約
   btn.disabled=false;btn.textContent='予約する';
   if(!r.ok){err.textContent=r.reason;err.style.display='block';return;}
   const p=patients[pid];
   const d=parseLocalDate(ds);
   const unitNote=isHalf?'【1単位】':(isThreeUnits?'【3単位・60分】':(isFourUnits?'【4単位・80分】':''));
-  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に${isReference?'参考予約':'予約'}【管理者】`,'admin');
+  await dbAddNotification(`${p.name}（${pid}）${d.getMonth()+1}/${d.getDate()} ${normTime}${unitNote}（${getStaffName(therapist)}）に予約【管理者】`,'admin');
 
   // 同月自動登録（1単位登録の場合は今回のみとし、自動登録の対象外とする）
   let autoCount=0;
@@ -2868,7 +2897,7 @@ async function weekTableDoBook(ds,therapist,time){
   if(autoCount>0){
     showToast(`${p.name} さんの予約を登録。同月分 ${autoCount}回分も自動登録しました`,'#34C759');
   } else {
-    showToast(isReference?`${p.name} さんの参考予約を登録しました`:`${p.name} さんの予約を登録しました`,'#34C759');
+    showToast(`${p.name} さんの予約を登録しました`,'#34C759');
   }
 }
 
@@ -3257,7 +3286,7 @@ function patientLogin(){
     renderPatientReminder(id);renderBanner();renderMyBook();renderReserve();renderHistory();
     showScreen('s-patient');
     document.getElementById('p-tabs').querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===0));
-    ['mybook','reserve','history','messages'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
+    ['mybook','reserve','history','messages','notes'].forEach((n,i)=>{const e=document.getElementById('ptab-'+n);if(e)e.style.display=i===0?'block':'none';});
   } else {err.style.display='block';}
 }
 
@@ -3374,10 +3403,111 @@ function renderPatientMessages(){
   el.innerHTML=html;
 }
 
+function getPatientMypageNoteData(pid=currentPid){
+  const raw=patientMypageNotes[String(pid)]||{};
+  return {
+    urls:Array.isArray(raw.urls)?raw.urls:[],
+    texts:Array.isArray(raw.texts)?raw.texts:[]
+  };
+}
+function createPatientNoteId(){
+  return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+}
+function renderPatientMypageNotes(){
+  const el=document.getElementById('ptab-notes');
+  if(!el||!currentPid)return;
+  const data=getPatientMypageNoteData();
+  let html='<div style="font-size:16px;font-weight:700;margin-bottom:12px">URL</div>';
+  if(data.urls.length){
+    html+=data.urls.map((item,i)=>{
+      const title=escapeHtml(item.title||'');
+      const url=escapeHtml(item.url||'');
+      const safeUrl=/^https?:\/\//i.test(String(item.url||''))?String(item.url):'';
+      return `<div class="card" style="margin-bottom:10px">
+        <div style="font-size:13px;color:#8E8E93;margin-bottom:6px">URL ${i+1}</div>
+        <div class="input-group" style="margin-bottom:8px"><label>タイトル</label><input type="text" id="pnote-url-title-${i}" value="${title}" placeholder="サイト名・資料名"></div>
+        <div class="input-group" style="margin-bottom:8px"><label>URL</label><input type="url" id="pnote-url-value-${i}" value="${url}" placeholder="https://..." inputmode="url"></div>
+        ${safeUrl?`<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;margin:4px 0 10px;color:#007AFF;overflow-wrap:anywhere">${title||url}</a>`:''}
+        <button class="btn btn-primary btn-block" type="button" onclick="savePatientMypageUrl(${i})">保存</button>
+      </div>`;
+    }).join('');
+  }else{
+    html+='<div style="font-size:13px;color:#8E8E93;margin:0 0 10px">登録したURLはありません</div>';
+  }
+  html+='<button class="btn btn-block" type="button" onclick="addPatientMypageUrl()" style="margin-bottom:22px;color:#007AFF;border-color:#007AFF">＋追加URL</button>';
+  html+='<div style="font-size:16px;font-weight:700;margin:4px 0 12px">文章</div>';
+  if(data.texts.length){
+    html+=data.texts.map((item,i)=>`<div class="card" style="margin-bottom:10px">
+      <div style="font-size:13px;color:#8E8E93;margin-bottom:6px">文章 ${i+1}</div>
+      <textarea id="pnote-text-${i}" rows="5" placeholder="文章を自由に入力してください" style="width:100%;resize:vertical;box-sizing:border-box;white-space:pre-wrap">${escapeHtml(item.content||'')}</textarea>
+      <button class="btn btn-primary btn-block" type="button" style="margin-top:8px" onclick="savePatientMypageText(${i})">保存</button>
+    </div>`).join('');
+  }else{
+    html+='<div style="font-size:13px;color:#8E8E93;margin:0 0 10px">保存した文章はありません</div>';
+  }
+  html+='<button class="btn btn-block" type="button" onclick="addPatientMypageText()" style="color:#007AFF;border-color:#007AFF">＋追加文章</button>';
+  el.innerHTML=html;
+}
+async function persistPatientMypageNotes(){
+  if(!currentPid)return false;
+  const {error}=await sb.from('system_settings').upsert({key:'patient_mypage_notes',value:JSON.stringify(patientMypageNotes)},{onConflict:'key'});
+  if(error){console.error('患者ノートの保存に失敗:',error);showToast('保存に失敗しました');return false;}
+  return true;
+}
+async function addPatientMypageUrl(){
+  if(!currentPid)return;
+  const pid=String(currentPid);
+  if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
+  if(!Array.isArray(patientMypageNotes[pid].urls))patientMypageNotes[pid].urls=[];
+  patientMypageNotes[pid].urls.push({id:createPatientNoteId(),title:'',url:''});
+  renderPatientMypageNotes();
+  const index=patientMypageNotes[pid].urls.length-1;
+  document.getElementById(`pnote-url-title-${index}`)?.focus();
+}
+async function savePatientMypageUrl(index){
+  if(!currentPid)return;
+  const title=document.getElementById(`pnote-url-title-${index}`)?.value.trim()||'';
+  const url=document.getElementById(`pnote-url-value-${index}`)?.value.trim()||'';
+  if(!title){showToast('タイトルを入力してください');return;}
+  if(!/^https?:\/\//i.test(url)){showToast('https:// または http:// から始まるURLを入力してください');return;}
+  const pid=String(currentPid);
+  if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
+  const urls=patientMypageNotes[pid].urls||(patientMypageNotes[pid].urls=[]);
+  if(!urls[index])urls[index]={id:createPatientNoteId()};
+  urls[index]={...urls[index],title,url};
+  if(await persistPatientMypageNotes()){
+    renderPatientMypageNotes();
+    showToast('URLを保存しました','#34C759');
+  }
+}
+async function addPatientMypageText(){
+  if(!currentPid)return;
+  const pid=String(currentPid);
+  if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
+  if(!Array.isArray(patientMypageNotes[pid].texts))patientMypageNotes[pid].texts=[];
+  patientMypageNotes[pid].texts.push({id:createPatientNoteId(),content:''});
+  renderPatientMypageNotes();
+  const index=patientMypageNotes[pid].texts.length-1;
+  document.getElementById(`pnote-text-${index}`)?.focus();
+}
+async function savePatientMypageText(index){
+  if(!currentPid)return;
+  const content=document.getElementById(`pnote-text-${index}`)?.value??'';
+  const pid=String(currentPid);
+  if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
+  const texts=patientMypageNotes[pid].texts||(patientMypageNotes[pid].texts=[]);
+  if(!texts[index])texts[index]={id:createPatientNoteId()};
+  texts[index]={...texts[index],content};
+  if(await persistPatientMypageNotes()){
+    renderPatientMypageNotes();
+    showToast('文章を保存しました','#34C759');
+  }
+}
+
 function switchTabByName(name){
   const tabBar=document.getElementById('p-tabs');
   const tabs=tabBar.querySelectorAll('.tab');
-  const nameMap={'mybook':0,'reserve':1,'history':2,'messages':3};
+  const nameMap={'mybook':0,'reserve':1,'history':2,'messages':3,'notes':4};
   const idx=nameMap[name];
   if(idx!==undefined) tabs[idx].click();
 }
@@ -4396,21 +4526,23 @@ function renderPatientList(){
   el.innerHTML=html;
   renderEndedPatientList();
 }
-// 終了一覧（終了ボタンを押した患者だけを表示。再登録で通常一覧へ戻す）
-function toggleEndedPatientList(){
-  const el=document.getElementById('ended-patient-list');
-  if(!el)return;
-  const opening=(el.style.display==='none');
-  el.style.display=opening?'block':'none';
-  const btn=document.getElementById('ended-list-btn');
-  if(btn)btn.textContent=opening?'終了一覧を閉じる':'終了一覧';
-  renderEndedPatientList();
-  // 通常一覧の下に表示されるため、開いたときは終了一覧の位置までスクロールする
-  if(opening)el.scrollIntoView({behavior:'smooth',block:'start'});
+// 患者管理内の各ページを切り替える
+function showPatientManagementPage(page,button){
+  const pages={list:'patient-page-list',new:'patient-page-new',ended:'patient-page-ended',print:'patient-page-print'};
+  Object.values(pages).forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
+  const target=document.getElementById(pages[page]);
+  if(target)target.style.display='block';
+  document.querySelectorAll('#patient-management-menu .btn').forEach(b=>b.classList.remove('btn-primary'));
+  const activeButton=button||document.querySelector(`#patient-management-menu .btn:nth-child(${({list:1,new:2,ended:3,print:4})[page]||1})`);
+  if(activeButton)activeButton.classList.add('btn-primary');
+  if(page==='list')renderPatientList();
+  if(page==='new')renderNewPatientForm();
+  if(page==='ended')renderEndedPatientList(true);
+  if(page==='print'){}
 }
-function renderEndedPatientList(){
+function renderEndedPatientList(force=false){
   const el=document.getElementById('ended-patient-list');
-  if(!el||el.style.display==='none')return;
+  if(!el||(!force&&document.getElementById('patient-page-ended')?.style.display==='none'))return;
   const ids=Object.keys(patients).filter(id=>isEndedPatient(id)&&!isArchivedPatient(id)&&!isTentativePatient(id))
     .sort((a,b)=>(patients[a].kana||patients[a].name).localeCompare(patients[b].kana||patients[b].name,'ja'));
   let html='<div style="font-size:14px;font-weight:700;margin:18px 0 8px;padding-top:12px;border-top:1px solid #E5E5EA">終了患者一覧</div>';
@@ -4476,10 +4608,12 @@ function toggleRehabRestartFields(prefix){
   if(fields)fields.style.display=enabled?'block':'none';
 }
 
-function openAddPatient(){
-  openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">＋ 新規患者登録</div>
-    <div class="input-group">
+function openAddPatient(){showPatientManagementPage('new');}
+function renderNewPatientForm(){
+  const el=document.getElementById('patient-new-form');
+  if(!el)return;
+  el.innerHTML=`<div class="card" style="max-width:760px;margin:0 auto">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px">＋ 新規患者登録</div><div class="input-group">
       <label>患者ID（半角英数字）</label>
       <input type="text" id="np-id" placeholder="例：ft900001" autocapitalize="none"
         oninput="checkPatientIdDuplicate(this.value)"
@@ -4505,7 +4639,7 @@ function openAddPatient(){
     <div class="input-group"><label>備考</label><input type="text" id="np-note" placeholder="任意"></div>
     <div class="input-group"><label>リハビリ歴</label><div id="np-rehab-history-rows">${patientRehabHistoryRowHTML('np')}</div><button type="button" class="btn btn-sm" onclick="addPatientRehabHistoryRow('np')">＋追加</button></div>
     <p id="np-err" style="font-size:13px;color:#FF3B30;margin-bottom:8px;display:none"></p>
-    <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`);
+    <button class="btn btn-primary btn-block" id="np-submit" onclick="saveNewPatient()">登録する</button>`;
 }
 
 function autoCalcNewPatientDeadline(){
@@ -4573,7 +4707,7 @@ async function saveNewPatient(){
   await saveRehabRestartPatients();
   await saveRehabHistoryPatients();
   await dbLog('admin','add_patient',`${name}（${id}）を登録`);
-  closeModal();renderPatientList();renderDeadline();updateLastUpdated();
+  showPatientManagementPage('list');renderDeadline();updateLastUpdated();
   showToast(`${name} さんを登録しました`,'#34C759');
 }
 function openEditPatient(id){
@@ -4660,41 +4794,22 @@ async function deletePatient(id){
   renderPatientList();renderDeadline();renderBasicBookingTable();updateLastUpdated();
   showToast(`${p.name}さんを患者管理から削除しました。実施済の履歴は保持されています`,'#34C759');
 }
-function openExcelImport(){
-  openModal(`<div class="modal-handle"></div>
-    <div class="modal-title">📋 CSV取込</div>
-    <div style="background:#F5F5F7;border-radius:8px;padding:10px 12px;font-size:12px;color:#8E8E93;margin-bottom:14px;line-height:1.7">
-      <strong>フォーマット（1行目はヘッダー）：</strong><br>
-      ID,患者名,フリガナ,生年月日,性別,疾患名,担当,リハビリ開始日,期限<br>
-      「担当」は設定タブのスタッフIDで入力してください（例: ${staffList[0]?.id||'tanaka'}）<br>
-      例: yt235485,山田太郎,ヤマダタロウ,1955-04-12,男,変形性膝関節症,${staffList[0]?.id||'tanaka'},2025-08-01,2025-09-30
-    </div>
-    <div class="input-group"><label>CSVファイル</label><input type="file" id="xl-file" accept=".csv" style="padding:10px;font-size:14px"></div>
-    <button class="btn btn-primary btn-block" id="xl-submit" onclick="doExcelImport()">取込実行</button>`);
-}
-async function doExcelImport(){
-  const file=document.getElementById('xl-file').files[0];
-  if(!file){showToast('ファイルを選択してください');return;}
-  const btn=document.getElementById('xl-submit');btn.disabled=true;btn.textContent='取込中...';
-  const reader=new FileReader();
-  reader.onload=async function(e){
-    const lines=e.target.result.split('\n').slice(1).filter(l=>l.trim());
-    let count=0;
-    for(const line of lines){
-      const cols=line.split(',');if(cols.length<5)continue;
-      const id=(cols[0]?.trim()||'').toLowerCase();
-      if(!id||patients[id])continue;
-      const newP={name:cols[1]?.trim()||'',kana:cols[2]?.trim()||'',dob:cols[3]?.trim()||'',gender:cols[4]?.trim()||'男',
-        disease:cols[5]?.trim()||'',therapist:cols[6]?.trim()||(staffList[0]?.id||''),
-        rehabStartDate:cols[7]?.trim()||'',deadline:cols[8]?new Date(cols[8].trim()):new Date('2025-12-31'),history:[],note:''};
-      const ok=await dbAddPatient(id,newP);
-      if(ok){patients[id]=newP;rehabStartDates[String(id)]=newP.rehabStartDate||'';count++;}
-    }
-    await saveRehabStartDates();
-    closeModal();renderPatientList();renderDeadline();updateLastUpdated();
-    showToast(`${count}件を取込みました`,'#34C759');
-  };
-  reader.readAsText(file,'UTF-8');
+
+function printPatientList(){
+  const ids=Object.keys(patients).filter(id=>!isTentativePatient(id)&&!isArchivedPatient(id)&&!isEndedPatient(id))
+    .sort((a,b)=>{
+      const ta=staffList.findIndex(x=>x.id===patients[a].therapist);
+      const tb=staffList.findIndex(x=>x.id===patients[b].therapist);
+      if(ta!==tb)return ta-tb;
+      return (patients[a].kana||patients[a].name).localeCompare(patients[b].kana||patients[b].name,'ja');
+    });
+  const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const rows=ids.map(id=>{const p=patients[id];return `<tr><td>${esc(id)}</td><td>${esc(p.name)}</td><td>${esc(p.kana)}</td><td>${esc(p.dob||'')}</td><td>${esc(p.gender||'')}</td><td>${esc(p.disease||'')}</td><td>${esc(getStaffName(p.therapist))}</td><td>${esc(p.rehabStartDate||'')}</td><td>${esc(p.rehabBillingStartDate||'')}</td><td>${esc(p.deadline?dateStr(p.deadline):'')}</td></tr>`;}).join('');
+  const area=document.getElementById('patient-print-area');
+  const printFont=ids.length>75?'5pt':ids.length>50?'6pt':'7pt';
+  const cellPadding=ids.length>75?'0.2mm 0.5mm':ids.length>50?'0.3mm 0.6mm':'0.4mm 0.7mm';
+  area.innerHTML=`<div class="patient-print-title">患者一覧 <span>（${ids.length}名）</span></div><table class="patient-print-table" style="font-size:${printFont};--patient-print-cell-padding:${cellPadding}"><thead><tr><th>ID</th><th>患者名</th><th>フリガナ</th><th>生年月日</th><th>性別</th><th>疾患名</th><th>担当</th><th>リハ開始日</th><th>算定開始日</th><th>期限</th></tr></thead><tbody>${rows||'<tr><td colspan="10">患者が登録されていません</td></tr>'}</tbody></table>`;
+  window.print();
 }
 
 // ---- ADMIN BOOKING ----
@@ -4703,28 +4818,6 @@ function isOverDeadline(pid){
   const p=patients[pid];
   if(!p||!p.deadline)return false;
   return p.deadline < TODAY;
-}
-
-// ---- CSV出力 ----
-function exportCSV(){
-  const header='ID,患者名,フリガナ,生年月日,性別,疾患名,担当,リハビリ開始日,期限';
-  const rows=Object.entries(patients).filter(([id])=>!isTentativePatient(id)&&!isArchivedPatient(id)).map(([id,p])=>{
-    const dl=p.deadline?dateStr(p.deadline):'';
-    const th=p.therapist||'';
-    // CSVエスケープ（カンマ・改行を含む場合はダブルクォートで囲む）
-    const esc=v=>v&&(v.includes(',')||v.includes('"')||v.includes('\n'))?`"${v.replace(/"/g,'""')}"`:(v||'');
-    return [id,esc(p.name),esc(p.kana),p.dob||'',p.gender||'',esc(p.disease),th,p.rehabStartDate||'',dl].join(',');
-  });
-  const csv='\uFEFF'+header+'\n'+rows.join('\n'); // BOM付きUTF-8（Excel対応）
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  const now=getJSTToday();
-  a.download=`患者データ_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast(`${rows.length}件のCSVを出力しました`,'#34C759');
 }
 
 // ---- 週間表PDF印刷 ----
