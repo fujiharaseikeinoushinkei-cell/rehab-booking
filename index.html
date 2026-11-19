@@ -3413,6 +3413,7 @@ function getPatientMypageNoteData(pid=currentPid){
 function createPatientNoteId(){
   return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 }
+let editingPatientMypageTextId=null;
 function renderPatientMypageNotes(){
   const el=document.getElementById('ptab-notes');
   if(!el||!currentPid)return;
@@ -3420,15 +3421,19 @@ function renderPatientMypageNotes(){
   let html='<div style="font-size:16px;font-weight:700;margin-bottom:12px">URL</div>';
   if(data.urls.length){
     html+=data.urls.map((item,i)=>{
-      const title=escapeHtml(item.title||'');
-      const url=escapeHtml(item.url||'');
-      const safeUrl=/^https?:\/\//i.test(String(item.url||''))?String(item.url):'';
+      const title=String(item.title||'');
+      const rawUrl=String(item.url||'');
+      const safeUrl=/^https?:\/\//i.test(rawUrl)?rawUrl:'';
+      if(title&&safeUrl){
+        return `<div class="card" style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+          <a class="btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="flex:1;min-width:0;justify-content:flex-start;color:#007AFF;text-decoration:none;overflow-wrap:anywhere">${escapeHtml(title)}</a>
+          <button class="btn btn-danger btn-sm" type="button" onclick="deletePatientMypageUrl(${i})">削除</button>
+        </div>`;
+      }
       return `<div class="card" style="margin-bottom:10px">
-        <div style="font-size:13px;color:#8E8E93;margin-bottom:6px">URL ${i+1}</div>
-        <div class="input-group" style="margin-bottom:8px"><label>タイトル</label><input type="text" id="pnote-url-title-${i}" value="${title}" placeholder="サイト名・資料名"></div>
-        <div class="input-group" style="margin-bottom:8px"><label>URL</label><input type="url" id="pnote-url-value-${i}" value="${url}" placeholder="https://..." inputmode="url"></div>
-        ${safeUrl?`<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" style="display:block;margin:4px 0 10px;color:#007AFF;overflow-wrap:anywhere">${title||url}</a>`:''}
-        <button class="btn btn-primary btn-block" type="button" onclick="savePatientMypageUrl(${i})">保存</button>
+        <div class="input-group" style="margin-bottom:8px"><label>タイトル</label><input type="text" id="pnote-url-title-${i}" value="${escapeHtml(title)}" placeholder="サイト名・資料名"></div>
+        <div class="input-group" style="margin-bottom:8px"><label>URL</label><input type="url" id="pnote-url-value-${i}" value="${escapeHtml(rawUrl)}" placeholder="https://..." inputmode="url"></div>
+        <div style="display:flex;gap:8px"><button class="btn btn-primary" type="button" style="flex:1" onclick="savePatientMypageUrl(${i})">保存</button><button class="btn btn-danger" type="button" onclick="deletePatientMypageUrl(${i})">削除</button></div>
       </div>`;
     }).join('');
   }else{
@@ -3437,11 +3442,19 @@ function renderPatientMypageNotes(){
   html+='<button class="btn btn-block" type="button" onclick="addPatientMypageUrl()" style="margin-bottom:22px;color:#007AFF;border-color:#007AFF">＋追加URL</button>';
   html+='<div style="font-size:16px;font-weight:700;margin:4px 0 12px">文章</div>';
   if(data.texts.length){
-    html+=data.texts.map((item,i)=>`<div class="card" style="margin-bottom:10px">
-      <div style="font-size:13px;color:#8E8E93;margin-bottom:6px">文章 ${i+1}</div>
-      <textarea id="pnote-text-${i}" rows="5" placeholder="文章を自由に入力してください" style="width:100%;resize:vertical;box-sizing:border-box;white-space:pre-wrap">${escapeHtml(item.content||'')}</textarea>
-      <button class="btn btn-primary btn-block" type="button" style="margin-top:8px" onclick="savePatientMypageText(${i})">保存</button>
-    </div>`).join('');
+    html+=data.texts.map((item,i)=>{
+      const isEditing=editingPatientMypageTextId===item.id||(!item.saved&&!String(item.content||''));
+      if(!isEditing){
+        return `<div class="card" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:10px">
+          <div style="flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6">${escapeHtml(item.content||'')}</div>
+          <button class="btn btn-sm" type="button" onclick="editPatientMypageText('${escapeJs(item.id)}')">編集</button>
+        </div>`;
+      }
+      return `<div class="card" style="margin-bottom:10px">
+        <textarea id="pnote-text-${i}" rows="5" placeholder="文章を自由に入力してください" style="width:100%;resize:vertical;box-sizing:border-box;white-space:pre-wrap">${escapeHtml(item.content||'')}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" type="button" style="flex:1" onclick="savePatientMypageText(${i})">保存</button><button class="btn btn-danger" type="button" style="flex:1" onclick="deletePatientMypageText(${i})">削除</button></div>
+      </div>`;
+    }).join('');
   }else{
     html+='<div style="font-size:13px;color:#8E8E93;margin:0 0 10px">保存した文章はありません</div>';
   }
@@ -3480,14 +3493,38 @@ async function savePatientMypageUrl(index){
     showToast('URLを保存しました','#34C759');
   }
 }
+async function deletePatientMypageUrl(index){
+  if(!currentPid)return;
+  const pid=String(currentPid);
+  const urls=patientMypageNotes[pid]?.urls;
+  if(!Array.isArray(urls)||!urls[index])return;
+  if(!confirm('このURLを削除しますか？'))return;
+  const removed=urls.splice(index,1)[0];
+  if(await persistPatientMypageNotes()){
+    renderPatientMypageNotes();
+    showToast('URLを削除しました','#34C759');
+  }else{
+    urls.splice(index,0,removed);
+    renderPatientMypageNotes();
+  }
+}
 async function addPatientMypageText(){
   if(!currentPid)return;
   const pid=String(currentPid);
   if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
   if(!Array.isArray(patientMypageNotes[pid].texts))patientMypageNotes[pid].texts=[];
-  patientMypageNotes[pid].texts.push({id:createPatientNoteId(),content:''});
+  const item={id:createPatientNoteId(),content:'',saved:false};
+  patientMypageNotes[pid].texts.push(item);
+  editingPatientMypageTextId=item.id;
   renderPatientMypageNotes();
   const index=patientMypageNotes[pid].texts.length-1;
+  document.getElementById(`pnote-text-${index}`)?.focus();
+}
+function editPatientMypageText(id){
+  editingPatientMypageTextId=id;
+  renderPatientMypageNotes();
+  const pid=String(currentPid);
+  const index=(patientMypageNotes[pid]?.texts||[]).findIndex(item=>item.id===id);
   document.getElementById(`pnote-text-${index}`)?.focus();
 }
 async function savePatientMypageText(index){
@@ -3497,10 +3534,31 @@ async function savePatientMypageText(index){
   if(!patientMypageNotes[pid])patientMypageNotes[pid]={urls:[],texts:[]};
   const texts=patientMypageNotes[pid].texts||(patientMypageNotes[pid].texts=[]);
   if(!texts[index])texts[index]={id:createPatientNoteId()};
-  texts[index]={...texts[index],content};
+  const previous={...texts[index]};
+  texts[index]={...texts[index],content,saved:true};
   if(await persistPatientMypageNotes()){
+    editingPatientMypageTextId=null;
     renderPatientMypageNotes();
     showToast('文章を保存しました','#34C759');
+  }else{
+    texts[index]=previous;
+    renderPatientMypageNotes();
+  }
+}
+async function deletePatientMypageText(index){
+  if(!currentPid)return;
+  const pid=String(currentPid);
+  const texts=patientMypageNotes[pid]?.texts;
+  if(!Array.isArray(texts)||!texts[index])return;
+  if(!confirm('この文章を削除しますか？'))return;
+  const removed=texts.splice(index,1)[0];
+  if(await persistPatientMypageNotes()){
+    editingPatientMypageTextId=null;
+    renderPatientMypageNotes();
+    showToast('文章を削除しました','#34C759');
+  }else{
+    texts.splice(index,0,removed);
+    renderPatientMypageNotes();
   }
 }
 
