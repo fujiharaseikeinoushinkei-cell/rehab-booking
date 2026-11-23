@@ -2611,7 +2611,7 @@ async function renderWeekTable(){
             const startForKey=normalizeTime((small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime)));
             const isFirstBooking=!!(fInfo&&!fInfo.hasDone&&uStatus==='reserved'&&!tentative&&fInfo.firstKey===`${ds} ${startForKey}`);
             const bg=isFirstBooking?'#FFF176':uStatus==='reference'?'#FFF7CC':uStatus==='done'?'#D1FAE5':uStatus==='cancelled'?'#FEE2E2':uStatus==='transfer'?'#FEF3C7':uStatus==='noshow'?'#FFE0E0':(tentative?TENTATIVE_BG:'transparent');
-            const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?((small?Number(bUnit||2):Number(unit||2))>=3?`実施済（${small?Number(bUnit||2):Number(unit||2)}単位）`:'実施済'):uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
+            const lbl=uStatus==='reference'?'参考予約':uStatus==='done'?((small?Number(bUnit||2):Number(unit||2))>=3?`実施済（${small?Number(bUnit||2):Number(unit||2)}単位）`:'実施済'):uStatus==='reserved'&&(small?Number(bUnit||2):Number(unit||2))===3?'（60分）':uStatus==='cancelled'?'✕':uStatus==='transfer'?'振':uStatus==='noshow'?'不在':'';
             const nameStyle=uStatus==='reference'?'color:#7A5A00;':uStatus==='noshow'?`color:#B00020;`:(tentative&&uStatus!=='done'&&uStatus!=='cancelled'&&uStatus!=='transfer'&&uStatus!=='reference')?`color:${TENTATIVE_FG};`:'';
             const clickTime=(small&&coverBottom?coverBottom.start:(coverTop?coverTop.start:uTime));
             return `<div onclick="event.stopPropagation();weekTableStatusModal('${ds}','${th}','${clickTime}')" style="cursor:pointer;background:${bg};border-radius:4px;padding:1px 2px;${small?'margin-top:2px;':''}">
