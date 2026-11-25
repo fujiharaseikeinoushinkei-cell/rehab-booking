@@ -3321,12 +3321,38 @@ async function dismissStaffReply(id){
   renderPatientMessages();
 }
 
+function getPatientNoticeSeenIds(pid=currentPid){
+  try{return new Set(JSON.parse(localStorage.getItem('patientNoticeSeen_'+String(pid))||'[]').map(String));}
+  catch(e){return new Set();}
+}
+function getPatientIncomingMessages(pid=currentPid){
+  return notifications.filter(n=>String(n.operator)===String(pid) && (
+    (String(n.text||'').includes(PATIENT_MESSAGE_MARK)) || isApprovedNotification(n)
+  ));
+}
+function openPatientMessagesFromNotice(){
+  if(!currentPid)return;
+  const incoming=getPatientIncomingMessages(currentPid);
+  const seen=getPatientNoticeSeenIds(currentPid);
+  incoming.forEach(n=>seen.add(String(n.id)));
+  try{localStorage.setItem('patientNoticeSeen_'+String(currentPid),JSON.stringify(Array.from(seen)));}
+  catch(e){console.warn('お知らせの既読状態を保存できません',e);}
+  renderMyBook();
+  const tab=document.querySelector('#p-tabs .tab[onclick*="messages"]');
+  if(tab)switchTab('p','messages',tab);
+}
 function renderMyBook(){
   const upcoming=getPatientUpcoming(currentPid);
   const el=document.getElementById('ptab-mybook');
   if(!el)return;
 
+  const seen=getPatientNoticeSeenIds(currentPid);
+  const hasUnread=getPatientIncomingMessages(currentPid).some(n=>!seen.has(String(n.id)));
   let html='';
+  html+=`<div style="margin-bottom:14px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">お知らせ</div>
+    ${hasUnread?'<button type="button" class="btn btn-block" onclick="openPatientMessagesFromNotice()" style="color:#007AFF;border-color:#007AFF">メッセージが来ています（クリック）</button>':''}
+  </div>`;
   html+=`<div style="margin-bottom:16px">
     <button class="btn btn-block" onclick="navigateToTopAvailabilityCalendar()" style="color:#007AFF;border-color:#007AFF">＋ 予約を追加したい場合はこちら</button>
     ${isOverDeadline(currentPid)?'<div style="margin-top:8px;font-size:13px;color:#D97706;text-align:center">リハビリ期限を超えたため、最大月６回までとなります</div>':''}
