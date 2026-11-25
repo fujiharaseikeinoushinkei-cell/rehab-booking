@@ -454,18 +454,18 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
   </div>
   <div style="background:#fff;border-bottom:1px solid #E5E5EA">
     <div class="admin-menu-grid">
-      <div class="tab2 active" onclick="switchTab('a','notify',this)">お知らせ</div>
-      <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
-      <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
+      <div class="tab2 active" onclick="switchTab('a','notify',this)">本日の予定</div>
       <div class="tab2" onclick="switchTab('a','patients',this)">患者管理</div>
       <div class="tab2" onclick="switchTab('a','booking',this)">一括予約</div>
       <div class="tab2" onclick="switchTab('a','slots',this)">リハビリ時間設定</div>
+      <div class="tab2" onclick="switchTab('a','weektable',this)">週間表</div>
+      <div class="tab2" onclick="switchTab('a','calendar',this)">カレンダー</div>
       <div class="tab2" onclick="switchTab('a','holidays',this)">休診日</div>
       <div class="tab2" onclick="switchTab('a','leaves',this)">PT休暇</div>
-      <div class="tab2" onclick="switchTab('a','logs',this)">分析</div>
       <div class="tab2" onclick="switchTab('a','deadline',this)">期限</div>
-      <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
+      <div class="tab2" onclick="switchTab('a','logs',this)">分析</div>
       <div class="tab2" onclick="switchTab('a','actuals',this)">📊 実績表</div>
+      <div class="tab2" onclick="switchTab('a','settings',this)">設定</div>
     </div>
   </div>
 
@@ -715,6 +715,12 @@ td{padding:9px 10px;border-bottom:1px solid #F2F2F7;color:#1C1C1E;vertical-align
 
   <!-- 期限アラート -->
   <div class="pad pt-12" id="atab-deadline" style="display:none">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <label for="dl-staff-filter" style="font-size:13px;font-weight:600">担当</label>
+      <select id="dl-staff-filter" onchange="setDeadlineStaffFilter(this.value)" style="font-size:14px;padding:7px 10px;border:1px solid #D1D1D6;border-radius:8px;background:#fff;min-width:150px">
+        <option value="all">全担当</option>
+      </select>
+    </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       <span class="badge badge-warn">残60日以下</span>
       <span class="badge badge-alert">残30日以下</span>
@@ -4495,13 +4501,25 @@ function anToggleLog(){
 }
 
 // ---- DEADLINE ----
+let deadlineStaffFilter='all';
+function setDeadlineStaffFilter(value){
+  deadlineStaffFilter=value||'all';
+  renderDeadline();
+}
 function renderDeadline(){
   const tb=document.getElementById('dl-tb');
+  const staffSelect=document.getElementById('dl-staff-filter');
+  if(staffSelect){
+    if(deadlineStaffFilter!=='all'&&!staffList.some(s=>s.id===deadlineStaffFilter))deadlineStaffFilter='all';
+    staffSelect.innerHTML='<option value="all">全担当</option>'+staffList.map(s=>`<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+    staffSelect.value=deadlineStaffFilter;
+  }
   const base=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
   const thisMonthEnd=new Date(TODAY.getFullYear(),TODAY.getMonth()+1,0);
   const nextMonthEnd=new Date(TODAY.getFullYear(),TODAY.getMonth()+2,0);
   const rows=Object.keys(patients)
     .filter(id=>!isTentativePatient(id)&&!isArchivedPatient(id)&&patients[id].deadline)
+    .filter(id=>deadlineStaffFilter==='all'||patients[id].therapist===deadlineStaffFilter)
     .map(id=>{
       const p=patients[id];
       const deadline=p.deadline instanceof Date?new Date(p.deadline):new Date(p.deadline);
